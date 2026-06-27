@@ -421,18 +421,21 @@ def download_bambuddy_library_file(session: requests.Session, file_id: int, dest
 
 # ── Manyfold helpers ──────────────────────────────────────────────────────────
 
-def obtain_manyfold_token(session: requests.Session) -> bool:
+def obtain_manyfold_token(session: requests.Session, scopes: str | None = None) -> bool:
     """Exchange client_credentials for an access token; update the global MANYFOLD_TOKEN.
 
     Only the client_credentials flow can mint a token carrying the 'upload'
     scope (personal access tokens can't), so this is the path used for syncing
-    files. Returns True on success. No-op (returns True) if client credentials
-    aren't configured — the caller then falls back to a pre-issued MANYFOLD_TOKEN.
+    files. ``scopes`` overrides the requested scope string (e.g. to add 'delete'
+    for the cleanup command). Returns True on success. No-op (returns True) if
+    client credentials aren't configured — the caller then falls back to a
+    pre-issued MANYFOLD_TOKEN.
     """
     global MANYFOLD_TOKEN
     if not (MANYFOLD_CLIENT_ID and MANYFOLD_CLIENT_SECRET):
         return True  # fall back to MANYFOLD_TOKEN
 
+    requested = scopes or MANYFOLD_SCOPES
     print("  🔑 Requesting Manyfold token via client_credentials...")
     try:
         resp = session.post(
@@ -441,7 +444,7 @@ def obtain_manyfold_token(session: requests.Session) -> bool:
                 "grant_type": "client_credentials",
                 "client_id": MANYFOLD_CLIENT_ID,
                 "client_secret": MANYFOLD_CLIENT_SECRET,
-                "scope": MANYFOLD_SCOPES,
+                "scope": requested,
             },
             timeout=15,
         )
@@ -451,6 +454,9 @@ def obtain_manyfold_token(session: requests.Session) -> bool:
 
     if not resp.ok:
         print(f"  ❌ Token request failed: {resp.status_code} {resp.text[:200]}")
+        if "invalid_scope" in resp.text and "delete" in requested:
+            print("     Your OAuth application is missing a requested scope (likely 'delete').")
+            print("     Add it in Manyfold → Settings → API, then retry.")
         return False
 
     data = resp.json()
@@ -500,6 +506,110 @@ def manyfold_post(session: requests.Session, url: str, payload: dict, timeout: i
         time.sleep(wait)
         resp = session.post(url, json=payload, headers=headers, timeout=timeout)
     return resp
+
+
+# ── Cleanup: delete empty models ──────────────────────────────────────────────
+
+def list_manyfold_models(session: requests.Session, collection_slug: str | None = None) -> list[tuple]:
+    """Return [(model_id, name)] for all models, optionally filtered to a collection.
+
+    Manyfold's model index supports ``?collection=<slug>`` (includes the
+    collection's sub-collections), so we can scope the scan server-side.
+    """
+    out: list[tuple] = []
+    page = 1
+    while True:
+        params = {"page": page}
+        if collection_slug:
+            params["collection"] = collection_slug
+        resp = session.get(f"{MANYFOLD_URL}/models", params=params, headers=manyfold_headers(), timeout=30)
+        if not resp.ok:
+            print(f"  ⚠️  Could not list models: {resp.status_code} {resp.text[:150]}")
+            break
+        data = resp.json()
+        members = data.get("member", [])
+        for m in members:
+            at_id = m.get("@id", "")
+            mid = at_id.rstrip("/").split("/")[-1] if at_id else None
+            if mid:
+                out.append((mid, m.get("name", "")))
+        total = data.get("totalItems", 0)
+        if not members or len(out) >= total:
+            break
+        page += 1
+    return out
+
+
+def manyfold_model_file_count(session: requests.Session, model_id: str) -> int | None:
+    """Return how many files a model has (len of hasPart), or None if unreadable."""
+    try:
+        resp = session.get(f"{MANYFOLD_URL}/models/{model_id}", headers=manyfold_headers(), timeout=20)
+        if not resp.ok:
+            return None
+        return len(resp.json().get("hasPart", []) or [])
+    except Exception:
+        return None
+
+
+def delete_manyfold_model(session: requests.Session, model_id: str) -> requests.Response:
+    """DELETE a model. Requires the token to hold the 'delete' scope."""
+    return session.delete(f"{MANYFOLD_URL}/models/{model_id}", headers=manyfold_headers(), timeout=30)
+
+
+def cleanup_empty_models(
+    session: requests.Session,
+    collection_name: str | None,
+    dry_run: bool,
+) -> int:
+    """Delete Manyfold models that have no files, optionally scoped to a collection.
+
+    Targets models whose ``hasPart`` is empty — i.e. a model that was created but
+    never got any file attached (e.g. an upload job that failed). A model with a
+    cover image still counts as having a file and is left alone. Honours dry_run.
+    Returns the number deleted (or that would be deleted in dry-run).
+    """
+    slug = None
+    if collection_name:
+        collections = get_existing_manyfold_collections(session)
+        at_id = collections.get(collection_name)
+        if not at_id:
+            print(f"  ⚠️  Collection '{collection_name}' not found in Manyfold — nothing to do.")
+            return 0
+        slug = at_id.rstrip("/").split("/")[-1]
+
+    scope_label = f"collection '{collection_name}'" if collection_name else "ALL collections"
+    print(f"\n🧹 Scanning {scope_label} for models with no files...")
+    models = list_manyfold_models(session, slug)
+    print(f"  {len(models)} model(s) to check")
+
+    empty: list[tuple] = []
+    for mid, name in tqdm(models, unit="model"):
+        count = manyfold_model_file_count(session, mid)
+        if count == 0:
+            empty.append((mid, name))
+    print(f"  Found {len(empty)} empty model(s).")
+
+    if dry_run:
+        for mid, name in empty:
+            print(f"    [dry-run] Would delete empty model: {name!r} ({mid})")
+        if empty:
+            print("   (dry-run — nothing deleted)")
+        return len(empty)
+
+    deleted = 0
+    for mid, name in empty:
+        resp = delete_manyfold_model(session, mid)
+        if resp.status_code in (200, 204):
+            print(f"    🗑  Deleted: {name!r}")
+            deleted += 1
+        elif resp.status_code in (401, 403):
+            print(f"    ❌ Not permitted to delete (status {resp.status_code}).")
+            print("       The token needs the 'delete' scope: add 'delete' to the OAuth")
+            print("       application in Manyfold → Settings → API, and include it in MANYFOLD_SCOPES.")
+            break
+        else:
+            print(f"    ⚠️  Failed to delete {name!r}: {resp.status_code} {resp.text[:150]}")
+    return deleted
 
 
 def get_existing_manyfold_models(session: requests.Session) -> set:
@@ -1675,10 +1785,19 @@ def main():
         action="store_true",
         help="Do not group multiple MakerWorld profiles of the same design into one model.",
     )
+    parser.add_argument(
+        "--cleanup-empty",
+        nargs="?",
+        const="MakerWorld",
+        metavar="COLLECTION",
+        help="Instead of syncing, delete Manyfold models that have no files. Optionally "
+             "limit to a collection by name (default 'MakerWorld'); pass 'ALL' to scan "
+             "every collection. Honours --dry-run. Requires the 'delete' OAuth scope.",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
-        print("🔍 DRY RUN mode — nothing will be uploaded.\n")
+        print("🔍 DRY RUN mode — nothing will be changed.\n")
 
     # Validate config
     missing = []
@@ -1695,6 +1814,20 @@ def main():
         sys.exit(1)
 
     session = requests.Session()
+
+    # ── Cleanup mode: delete empty models, then exit ──────────────────────────
+    if args.cleanup_empty is not None:
+        # Need a token that includes the 'delete' scope.
+        scopes = MANYFOLD_SCOPES if "delete" in MANYFOLD_SCOPES.split() else f"{MANYFOLD_SCOPES} delete"
+        print("🔌 Connecting to Manyfold for cleanup...")
+        if not obtain_manyfold_token(session, scopes=scopes):
+            sys.exit(1)
+        collection = None if args.cleanup_empty.upper() == "ALL" else args.cleanup_empty
+        deleted = cleanup_empty_models(session, collection, args.dry_run)
+        print(f"\n✅ Cleanup complete — {deleted} empty model(s) "
+              f"{'would be ' if args.dry_run else ''}deleted.")
+        return
+
     check_connections(session)
 
     state = load_sync_state()

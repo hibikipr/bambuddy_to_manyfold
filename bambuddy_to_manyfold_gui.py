@@ -35,7 +35,7 @@ import threading
 import tkinter as tk
 import zlib
 from pathlib import Path
-from tkinter import filedialog, font, messagebox, scrolledtext, ttk
+from tkinter import filedialog, font, messagebox, scrolledtext, simpledialog, ttk
 
 
 # ── App icon ──────────────────────────────────────────────────────────────────
@@ -527,7 +527,12 @@ class App(tk.Tk):
             top_btn_frame, text="⬛  Stop", command=self._request_stop,
             state="disabled", style="Danger.TButton"
         )
-        self._stop_btn.pack(side="left")
+        self._stop_btn.pack(side="left", padx=(0, 6))
+
+        self._cleanup_btn = ttk.Button(
+            top_btn_frame, text="🧹  Clean empty models", command=self._start_cleanup
+        )
+        self._cleanup_btn.pack(side="left")
 
         ttk.Button(
             top_btn_frame, text="Clear log", command=self._clear_log
@@ -698,6 +703,7 @@ class App(tk.Tk):
         self._running = True
         self._load_btn.configure(state="disabled")
         self._run_btn.configure(state="disabled")
+        self._cleanup_btn.configure(state="disabled")
         self._stop_btn.configure(state="normal")
         self._progress.start(12)
         threading.Thread(target=self._load_worker, args=(cfg,), daemon=True).start()
@@ -777,6 +783,7 @@ class App(tk.Tk):
         self._running = False
         self._progress.stop()
         self._load_btn.configure(state="normal")
+        self._cleanup_btn.configure(state="normal")
         self._stop_btn.configure(state="disabled")
 
         self._archives  = archives
@@ -867,6 +874,7 @@ class App(tk.Tk):
         self._running = True
         self._load_btn.configure(state="disabled")
         self._run_btn.configure(state="disabled")
+        self._cleanup_btn.configure(state="disabled")
         self._stop_btn.configure(state="normal")
         self._progress.start(12)
 
@@ -885,12 +893,101 @@ class App(tk.Tk):
         self._progress.stop()
         self._load_btn.configure(state="normal")
         self._run_btn.configure(state="normal")
+        self._cleanup_btn.configure(state="normal")
         self._stop_btn.configure(state="disabled")
         # Auto-reload so the lists reflect the new synced statuses.
         if getattr(self, "_reload_after_sync", False):
             self._reload_after_sync = False
             self._append_log("\n🔄 Reloading models to refresh statuses…\n")
             self.after(500, self._start_load)
+
+    # ── Cleanup: delete empty models ──────────────────────────────────────────
+
+    def _start_cleanup(self):
+        cfg = self._validate_config()
+        if cfg is None:
+            return
+
+        collection = simpledialog.askstring(
+            "Clean up empty models",
+            "Delete models that have NO files in this collection.\n\n"
+            "Collection name (or 'ALL' for every collection):",
+            initialvalue="MakerWorld",
+            parent=self,
+        )
+        if collection is None:
+            return  # cancelled
+        collection = collection.strip()
+
+        dry_run = self._dry_run_var.get()
+        scope = "ALL collections" if collection.upper() == "ALL" else f"collection '{collection}'"
+        if not dry_run:
+            if not messagebox.askyesno(
+                "Confirm deletion",
+                f"This will permanently DELETE every model in {scope} that has no "
+                f"files.\n\nThis cannot be undone. Continue?",
+                icon="warning", parent=self,
+            ):
+                return
+        else:
+            self._append_log(f"\n🧹 Dry run — listing empty models in {scope} (nothing deleted).\n")
+
+        self._running = True
+        self._load_btn.configure(state="disabled")
+        self._run_btn.configure(state="disabled")
+        self._cleanup_btn.configure(state="disabled")
+        self._stop_btn.configure(state="disabled")
+        self._progress.start(12)
+        threading.Thread(
+            target=self._cleanup_worker, args=(cfg, collection, dry_run), daemon=True
+        ).start()
+
+    def _cleanup_worker(self, cfg: dict, collection: str, dry_run: bool):
+        self._set_env(cfg)
+
+        import importlib
+        import bambuddy_to_manyfold as sync_mod
+        importlib.reload(sync_mod)
+
+        writer = _QueueWriter(self._log_queue)
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = sys.stderr = writer  # type: ignore[assignment]
+
+        try:
+            import datetime
+            import requests as _requests
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"\n{'─' * 60}")
+            print(f"  🧹  Cleanup started at {ts}" + ("  [DRY RUN]" if dry_run else ""))
+            print(f"{'─' * 60}\n")
+
+            session = _requests.Session()
+            # A delete-capable token is required.
+            scopes = sync_mod.MANYFOLD_SCOPES
+            if "delete" not in scopes.split():
+                scopes = f"{scopes} delete"
+            if not sync_mod.obtain_manyfold_token(session, scopes=scopes):
+                print("❌ Could not obtain a delete-capable token.")
+            else:
+                target = None if collection.upper() == "ALL" else collection
+                deleted = sync_mod.cleanup_empty_models(session, target, dry_run)
+                print(f"\n✅ Cleanup complete — {deleted} empty model(s) "
+                      f"{'would be ' if dry_run else ''}deleted.")
+        except Exception as e:
+            print(f"\n❌ Cleanup error: {e}\n")
+        finally:
+            sys.stdout = old_out
+            sys.stderr = old_err
+            self.after(0, self._cleanup_done)
+
+    def _cleanup_done(self):
+        self._running = False
+        self._progress.stop()
+        self._load_btn.configure(state="normal")
+        self._cleanup_btn.configure(state="normal")
+        self._stop_btn.configure(state="disabled")
+        if self._archives or self._lib_files:
+            self._run_btn.configure(state="normal")
 
     def _sync_worker(
         self,

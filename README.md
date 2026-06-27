@@ -63,7 +63,8 @@ Manyfold **cannot** carry the `upload` scope — you **must** use the OAuth
 **client_credentials** flow.
 
 1. In Manyfold, go to **Settings → API** and create an OAuth application.
-2. Grant it the scopes: **`public read write upload`**.
+2. Grant it the scopes: **`public read write upload`** (add **`delete`** too if you
+   want to use the empty-model cleanup — see `--cleanup-empty`).
 3. Note its **Client ID** and **Client Secret**.
 
 The script exchanges these for a short-lived token automatically and requests the
@@ -125,6 +126,13 @@ python3 bambuddy_to_manyfold.py --no-enrich
 
 # Don't group multiple MakerWorld profiles of one design into a single model
 python3 bambuddy_to_manyfold.py --no-group
+
+# Clean up: delete Manyfold models that have no files (e.g. failed uploads).
+# Defaults to the "MakerWorld" collection; pass a name, or ALL for everything.
+# Combine with --dry-run to preview. Requires the 'delete' OAuth scope.
+python3 bambuddy_to_manyfold.py --cleanup-empty --dry-run
+python3 bambuddy_to_manyfold.py --cleanup-empty "MakerWorld"
+python3 bambuddy_to_manyfold.py --cleanup-empty ALL
 ```
 
 ### Flags
@@ -137,6 +145,7 @@ python3 bambuddy_to_manyfold.py --no-group
 | `--no-links` | Skips attaching MakerWorld source URLs as links on synced models. |
 | `--no-enrich` | Skips fetching MakerWorld details (description, tags, cover image). |
 | `--no-group` | Syncs each MakerWorld profile as its own model instead of grouping profiles of the same design into one. |
+| `--cleanup-empty [COLLECTION]` | Instead of syncing, deletes Manyfold models that have **no files** (e.g. left over from failed uploads). Limits to a collection by name (default `MakerWorld`), or pass `ALL` for every collection. Respects `--dry-run`. Needs the **`delete`** OAuth scope (see below). |
 
 A convenience wrapper, [`run_sync.sh`](run_sync.sh), exports the env vars and
 runs the script. Edit it with your values, then `./run_sync.sh [--dry-run]`.
@@ -181,6 +190,11 @@ Workflow:
   same design are combined into a single Manyfold model holding all the plate
   files, instead of one model per profile.
 - **Log debug** — show verbose diagnostics (pagination, scope probe, etc.).
+
+The **🧹 Clean empty models** button deletes Manyfold models that have no files
+(handy for clearing failed uploads). It asks for a collection name (default
+`MakerWorld`, or `ALL`), confirms before deleting, and respects the **Dry run**
+checkbox so you can preview first. Needs the `delete` OAuth scope.
 
 Output streams live into the log pane, colour-coded, with a timestamped marker
 at the start of each load/sync.
