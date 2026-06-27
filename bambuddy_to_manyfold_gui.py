@@ -316,6 +316,12 @@ class App(tk.Tk):
             top_btn_frame, text="Add MakerWorld links", variable=self._links_var
         ).pack(side="left", padx=(0, 12))
 
+        self._enrich_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            top_btn_frame, text="Fetch MakerWorld details (description + cover)",
+            variable=self._enrich_var
+        ).pack(side="left", padx=(0, 12))
+
         self._debug_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             top_btn_frame, text="Log debug", variable=self._debug_var
@@ -632,6 +638,7 @@ class App(tk.Tk):
         create_missing = self._create_missing_var.get()
         force = self._force_var.get()
         add_links = self._links_var.get()
+        enrich = self._enrich_var.get()
         self._running = True
         self._load_btn.configure(state="disabled")
         self._run_btn.configure(state="disabled")
@@ -640,7 +647,7 @@ class App(tk.Tk):
 
         threading.Thread(
             target=self._sync_worker,
-            args=(cfg, dry_run, create_missing, force, add_links, selected_archive_ids, selected_file_ids),
+            args=(cfg, dry_run, create_missing, force, add_links, enrich, selected_archive_ids, selected_file_ids),
             daemon=True,
         ).start()
 
@@ -662,6 +669,7 @@ class App(tk.Tk):
         create_missing: bool,
         force: bool,
         add_links: bool,
+        enrich: bool,
         selected_archive_ids: set[int],
         selected_file_ids: set[int],
     ):
@@ -709,6 +717,7 @@ class App(tk.Tk):
                     create_missing=create_missing,
                     force=force,
                     add_source_links=add_links,
+                    enrich_from_makerworld=enrich,
                 )
 
                 if not dry_run:

@@ -18,12 +18,15 @@ Manyfold API docs:   http://<your-manyfold>/api
 
 import argparse
 import hashlib
+import html
 import json
 import os
+import re
 import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 from tqdm import tqdm
@@ -203,6 +206,91 @@ def get_bambuddy_makerworld_urls(session: requests.Session) -> dict[int, str]:
         print(f"    {len(mapping)} MakerWorld source link(s) found (max 50)")
         dprint(f"    MakerWorld-linked file IDs: {sorted(mapping)}")
     return mapping
+
+
+def get_makerworld_design(session: requests.Session, source_url: str) -> dict | None:
+    """Resolve a MakerWorld URL to its design metadata via Bambuddy.
+
+    Reuses Bambuddy's /makerworld/resolve endpoint (which handles MakerWorld's
+    auth, anti-bot, and CDN quirks) rather than re-implementing the client.
+    Returns the ``design`` dict (title, summary, coverUrl, license, tags, …) or
+    None on any failure (non-fatal — enrichment is best-effort).
+    """
+    try:
+        resp = session.post(
+            f"{BAMBUDDY_URL}/api/v1/makerworld/resolve",
+            json={"url": source_url},
+            headers=bambuddy_headers(),
+            timeout=45,
+        )
+        if not resp.ok:
+            dprint(f"    ⚠️  MakerWorld resolve failed: {resp.status_code} {resp.text[:150]}")
+            return None
+        design = resp.json().get("design")
+        return design if isinstance(design, dict) else None
+    except Exception as e:
+        dprint(f"    ⚠️  MakerWorld resolve error: {e}")
+        return None
+
+
+def download_makerworld_image(session: requests.Session, image_url: str, dest: Path) -> bool:
+    """Download a MakerWorld CDN image via Bambuddy's thumbnail proxy."""
+    try:
+        resp = session.get(
+            f"{BAMBUDDY_URL}/api/v1/makerworld/thumbnail",
+            params={"url": image_url},
+            headers=bambuddy_headers(),
+            stream=True,
+            timeout=60,
+        )
+        if not resp.ok:
+            dprint(f"    ⚠️  Image download failed: {resp.status_code}")
+            return False
+        with open(dest, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+        return dest.stat().st_size > 0
+    except Exception as e:
+        dprint(f"    ⚠️  Image download error: {e}")
+        return False
+
+
+def _html_to_text(value: str | None) -> str | None:
+    """Convert MakerWorld's HTML summary into plain text for the Manyfold notes.
+
+    Keeps paragraph/line breaks, drops all other tags, unescapes entities.
+    """
+    if not value:
+        return None
+    text = re.sub(r"(?i)</p\s*>", "\n\n", value)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)        # strip remaining tags
+    text = html.unescape(text)
+    text = re.sub(r"\n{3,}", "\n\n", text)     # collapse excess blank lines
+    return text.strip() or None
+
+
+def _extract_makerworld_tags(design: dict) -> list[str]:
+    """Pull a flat list of tag strings from the design's ``tags`` field, if any."""
+    raw = design.get("tags")
+    if not isinstance(raw, list):
+        return []
+    tags: list[str] = []
+    for t in raw:
+        if isinstance(t, str) and t.strip():
+            tags.append(t.strip())
+        elif isinstance(t, dict):
+            name = t.get("name") or t.get("title")
+            if isinstance(name, str) and name.strip():
+                tags.append(name.strip())
+    return tags
+
+
+def _image_ext_from_url(url: str) -> str:
+    """Return a sane image extension from a URL path (default .png)."""
+    path = urlsplit(url).path
+    ext = Path(path).suffix.lower()
+    return ext if ext in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"} else ".png"
 
 
 def download_bambuddy_archive(session: requests.Session, archive_id: int, dest: Path):
@@ -438,6 +526,86 @@ def add_manyfold_model_link(session: requests.Session, model_id: str, url: str, 
     return False
 
 
+def patch_manyfold_model_metadata(
+    session: requests.Session,
+    model_id: str,
+    description: str | None = None,
+    tag_list: list[str] | None = None,
+) -> bool:
+    """PATCH description (notes) and/or tags onto an existing Manyfold model."""
+    payload: dict = {}
+    if description:
+        payload["description"] = description
+    if tag_list:
+        payload["keywords"] = tag_list
+    if not payload:
+        return True
+    resp = session.patch(
+        f"{MANYFOLD_URL}/models/{model_id}",
+        json=payload,
+        headers={**manyfold_headers(), "Content-Type": "application/vnd.manyfold.v0+json"},
+        timeout=30,
+    )
+    if resp.ok:
+        return True
+    print(f"    ⚠️  Failed to set metadata on model {model_id}: {resp.status_code} {resp.text[:200]}")
+    return False
+
+
+def add_image_to_manyfold_model(session: requests.Session, model_id: str, image_path: Path) -> bool:
+    """Tus-upload an image and attach it to an existing Manyfold model as a file."""
+    upload_url = tus_upload_file(session, image_path)
+    if not upload_url:
+        return False
+    resp = session.post(
+        f"{MANYFOLD_URL}/models/{model_id}/model_files",
+        json={"files": [{"id": upload_url, "name": image_path.name}]},
+        headers={**manyfold_headers(), "Content-Type": "application/vnd.manyfold.v0+json"},
+        timeout=60,
+    )
+    if resp.status_code == 202:
+        return True
+    print(f"    ⚠️  Failed to add image to model {model_id}: {resp.status_code} {resp.text[:200]}")
+    return False
+
+
+def enrich_manyfold_model_from_makerworld(
+    session: requests.Session,
+    model_id: str,
+    model_name: str,
+    source_url: str,
+) -> None:
+    """Fetch MakerWorld design metadata and apply it to a Manyfold model.
+
+    Best-effort: sets description + tags, and attaches the cover image. Any
+    individual failure is logged (debug) and skipped — never raises.
+    """
+    design = get_makerworld_design(session, source_url)
+    if not design:
+        return
+
+    description = _html_to_text(design.get("summary"))
+    tags = _extract_makerworld_tags(design)
+    if description or tags:
+        if patch_manyfold_model_metadata(session, model_id, description=description, tag_list=tags):
+            bits = []
+            if description:
+                bits.append("description")
+            if tags:
+                bits.append(f"{len(tags)} tag(s)")
+            dprint(f"    📝 Set {', '.join(bits)}")
+
+    cover_url = design.get("coverUrl") or design.get("cover")
+    if cover_url:
+        ext = _image_ext_from_url(cover_url)
+        safe_name = re.sub(r"[^\w.-]+", "_", model_name)[:60] or "cover"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            img_dest = Path(tmpdir) / f"{safe_name}_cover{ext}"
+            if download_makerworld_image(session, cover_url, img_dest):
+                if add_image_to_manyfold_model(session, model_id, img_dest):
+                    dprint("    🖼  Attached MakerWorld cover image")
+
+
 def create_manyfold_model_from_upload(
     session: requests.Session,
     name: str,
@@ -446,6 +614,8 @@ def create_manyfold_model_from_upload(
     collection_at_id: str | None = None,
     source_url: str | None = None,
     source_text: str = "Source",
+    add_link: bool = True,
+    enrich: bool = False,
 ) -> bool:
     """Create a model in Manyfold from a previously-uploaded Tus file.
 
@@ -453,13 +623,16 @@ def create_manyfold_model_from_upload(
     "empty model" concept in the API. Returns True on 202 Accepted.
 
     If ``source_url`` is given, the model is located after the async creation
-    job runs and the URL is PATCHed on as a link (the upload endpoint can't
-    accept links directly). Link attachment is best-effort: a failure to find
-    the model in time logs a warning but doesn't fail the sync.
+    job runs; with ``add_link`` the URL is PATCHed on as a link (the upload
+    endpoint can't accept links directly), and with ``enrich`` the MakerWorld
+    design metadata (description, tags, cover image) is fetched and applied.
+    All of this is best-effort: a failure to find the model in time logs a
+    warning but doesn't fail the sync.
     """
     # Snapshot existing model IDs first so we can detect the newly-created one
-    # by diff after the async job runs (only needed when attaching a link).
-    existing_ids = _get_all_manyfold_model_ids(session) if source_url else set()
+    # by diff after the async job runs (needed to attach a link / enrich).
+    need_lookup = bool(source_url) and (add_link or enrich)
+    existing_ids = _get_all_manyfold_model_ids(session) if need_lookup else set()
 
     # Always send isPartOf — an EMPTY array when there's no collection.
     # Manyfold's ProcessUploadedFileJob crashes with "undefined method 'map'
@@ -483,13 +656,15 @@ def create_manyfold_model_from_upload(
         print(f"    ⚠️  Model create failed for '{name}': {resp.status_code} {resp.text[:300]}")
         return False
 
-    if source_url:
+    if need_lookup:
         model_id = _poll_for_new_manyfold_model(session, existing_ids)
         if model_id:
-            if add_manyfold_model_link(session, model_id, source_url, source_text):
+            if add_link and add_manyfold_model_link(session, model_id, source_url, source_text):
                 dprint(f"    🔗 Linked {source_text}: {source_url}")
+            if enrich and source_text == "MakerWorld":
+                enrich_manyfold_model_from_makerworld(session, model_id, name, source_url)
         else:
-            print(f"    ⚠️  Created '{name}' but couldn't locate it to attach the source link.")
+            print(f"    ⚠️  Created '{name}' but couldn't locate it to attach the source link / details.")
 
     return True
 
@@ -565,16 +740,23 @@ def upload_model_to_manyfold(
     dry_run: bool,
     source_url: str | None = None,
     source_text: str = "Source",
+    add_link: bool = True,
+    enrich: bool = False,
 ) -> bool:
     """Tus-upload a file and create a model from it in Manyfold.
 
     Wraps the two-step Manyfold flow (tus upload → POST /models) so the
     sync loops have a single call site. Honours dry_run. When ``source_url``
-    is given it's attached to the created model as a link (best-effort).
+    is given, ``add_link`` attaches it as a link and ``enrich`` applies the
+    MakerWorld description/tags/cover image (both best-effort).
     """
     if dry_run:
-        link_note = f" with {source_text} link" if source_url else ""
-        print(f"    [dry-run] Would upload {file_path.name} and create model '{model_name}'{link_note}")
+        note = ""
+        if source_url:
+            extras = [n for n, on in (("link", add_link), ("details", enrich)) if on]
+            if extras:
+                note = f" with {source_text} " + " + ".join(extras)
+        print(f"    [dry-run] Would upload {file_path.name} and create model '{model_name}'{note}")
         return True
 
     upload_url = tus_upload_file(session, file_path)
@@ -582,7 +764,7 @@ def upload_model_to_manyfold(
         return False
     return create_manyfold_model_from_upload(
         session, model_name, upload_url, file_path.name, collection_at_id,
-        source_url=source_url, source_text=source_text,
+        source_url=source_url, source_text=source_text, add_link=add_link, enrich=enrich,
     )
 
 
@@ -658,6 +840,7 @@ def sync_library_files(
     create_missing: bool = True,
     force: bool = False,
     add_source_links: bool = True,
+    enrich_from_makerworld: bool = True,
 ) -> int:
     if selected_ids is not None and len(selected_ids) == 0:
         print("\n📁 No library files selected — skipping.")
@@ -665,8 +848,10 @@ def sync_library_files(
     lib_files = get_bambuddy_library_files(session)
     if selected_ids is not None:
         lib_files = [f for f in lib_files if f.get("id") in selected_ids]
-    # Map of library_file_id → MakerWorld source URL (for attaching links).
-    makerworld_urls = get_bambuddy_makerworld_urls(session) if add_source_links else {}
+    # Map of library_file_id → MakerWorld source URL (for links + enrichment).
+    # Enrichment implies we need the URLs too.
+    need_urls = add_source_links or enrich_from_makerworld
+    makerworld_urls = get_bambuddy_makerworld_urls(session) if need_urls else {}
     flat_folders = _flatten_folders(get_bambuddy_library_folders(session))
     # Map bambuddy folder_id → folder dict (with _full_path)
     folder_by_id: dict[int, dict] = {f["id"]: f for f in flat_folders}
@@ -753,15 +938,16 @@ def sync_library_files(
                 continue
 
             collection_at_id = _ensure_collection(folder_id)
-            source_url = makerworld_urls.get(file_id)
+            source_url = makerworld_urls.get(file_id) if (add_source_links or enrich_from_makerworld) else None
             if source_url:
                 tqdm.write(f"  🔗 MakerWorld source: {source_url}")
-            elif add_source_links:
+            elif need_urls:
                 dprint(f"    (no MakerWorld link for file id {file_id} — not in recent-imports window)")
             tqdm.write(f"  ↑  Uploading to Manyfold: {label}")
             ok = upload_model_to_manyfold(
                 session, model_name, dest, collection_at_id, dry_run,
                 source_url=source_url, source_text="MakerWorld",
+                add_link=add_source_links, enrich=enrich_from_makerworld,
             )
 
         if ok:
@@ -895,6 +1081,11 @@ def main():
         action="store_true",
         help="Do not attach MakerWorld source URLs as links on synced models.",
     )
+    parser.add_argument(
+        "--no-enrich",
+        action="store_true",
+        help="Do not fetch MakerWorld details (description, tags, cover image) for synced models.",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
@@ -924,7 +1115,7 @@ def main():
     start = time.time()
     create_missing = not args.no_create
     archives_added = sync_archives(session, state, existing_names, args.dry_run, create_missing=create_missing, force=args.force)
-    library_added = sync_library_files(session, state, existing_names, args.dry_run, create_missing=create_missing, force=args.force, add_source_links=not args.no_links)
+    library_added = sync_library_files(session, state, existing_names, args.dry_run, create_missing=create_missing, force=args.force, add_source_links=not args.no_links, enrich_from_makerworld=not args.no_enrich)
 
     if not args.dry_run:
         save_sync_state(state)

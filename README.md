@@ -88,6 +88,9 @@ python3 bambuddy_to_manyfold.py --force
 
 # Don't attach MakerWorld source URLs as links on synced models
 python3 bambuddy_to_manyfold.py --no-links
+
+# Don't fetch MakerWorld details (description, tags, cover image)
+python3 bambuddy_to_manyfold.py --no-enrich
 ```
 
 ### Flags
@@ -98,6 +101,7 @@ python3 bambuddy_to_manyfold.py --no-links
 | `--no-create` | Skips any model not already present in Manyfold. |
 | `--force` | Ignores the local sync-state file so already-recorded items are re-processed. The live "already in Manyfold" check still applies, so this won't create duplicates of models that genuinely synced. |
 | `--no-links` | Skips attaching MakerWorld source URLs as links on synced models. |
+| `--no-enrich` | Skips fetching MakerWorld details (description, tags, cover image). |
 
 A convenience wrapper, [`run_sync.sh`](run_sync.sh), exports the env vars and
 runs the script. Edit it with your values, then `./run_sync.sh [--dry-run]`.
@@ -129,6 +133,9 @@ Workflow:
   state file lists them as synced (equivalent to `--force`).
 - **Add MakerWorld links** — attach the MakerWorld source URL (for library files
   imported from MakerWorld) as a clickable link on the created Manyfold model.
+- **Fetch MakerWorld details (description + cover)** — pull the model's
+  description, tags, and cover image from MakerWorld and apply them to the
+  Manyfold model.
 - **Log debug** — show verbose diagnostics (pagination, scope probe, etc.).
 
 Output streams live into the log pane, colour-coded, with a timestamped marker
@@ -149,12 +156,17 @@ at the start of each load/sync.
   create the model asynchronously (returns `202 Accepted`).
 - **State** is tracked in the sync-state JSON: synced archive IDs, synced library
   file IDs, and a Bambuddy-folder → Manyfold-collection mapping.
-- **MakerWorld links** — files imported into Bambuddy via "Import from MakerWorld"
-  carry a source URL. The sync fetches these from `GET /makerworld/recent-imports`
-  and, after a model is created, PATCHes the URL on as a Manyfold link. Because
-  that endpoint is capped at 50 rows, only the 50 most recent MakerWorld imports
-  get links; the upload endpoint itself can't accept links, so this is done as a
-  best-effort follow-up (a file still syncs if the link step can't find it).
+- **MakerWorld links + details** — files imported into Bambuddy via "Import from
+  MakerWorld" carry a source URL. The sync fetches these from
+  `GET /makerworld/recent-imports` and, after a model is created, PATCHes the URL
+  on as a Manyfold link. When **enrichment** is enabled it also resolves the
+  MakerWorld design (via Bambuddy's `POST /makerworld/resolve`) and applies the
+  **description** (notes), **tags** (keywords), and **cover image** (uploaded as
+  a model file) to the Manyfold model. Because `recent-imports` is capped at 50
+  rows, only the 50 most recent MakerWorld imports get links/details; the upload
+  endpoint can't accept links or images directly, so all of this is a best-effort
+  follow-up after the async model-creation job (a file still syncs if the model
+  can't be located in time).
 
 ---
 
