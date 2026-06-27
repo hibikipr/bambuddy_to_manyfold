@@ -108,6 +108,9 @@ class App(tk.Tk):
         ]
 
         self._vars: dict[str, tk.StringVar] = {}
+        self._secret_entries: dict[str, ttk.Entry] = {}
+        self._show_vars: dict[str, tk.BooleanVar] = {}
+
         for row, (label, key, secret) in enumerate(fields):
             ttk.Label(cfg_frame, text=label + ":").grid(
                 row=row, column=0, sticky="e", padx=(8, 4), pady=3
@@ -118,7 +121,16 @@ class App(tk.Tk):
             entry = ttk.Entry(cfg_frame, textvariable=var, show=show, width=52)
             entry.grid(row=row, column=1, sticky="ew", padx=(0, 4), pady=3)
 
-            if key == "sync_state_file":
+            if secret:
+                self._secret_entries[key] = entry
+                show_var = tk.BooleanVar(value=False)
+                self._show_vars[key] = show_var
+                ttk.Checkbutton(
+                    cfg_frame, text="Show",
+                    variable=show_var,
+                    command=lambda e=entry, v=show_var: e.configure(show="" if v.get() else "*"),
+                ).grid(row=row, column=2, padx=(0, 8), pady=3)
+            elif key == "sync_state_file":
                 ttk.Button(
                     cfg_frame, text="Browse…", width=8,
                     command=self._browse_state_file,
