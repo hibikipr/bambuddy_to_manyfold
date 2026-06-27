@@ -57,7 +57,7 @@ def load_sync_state() -> dict:
     if Path(SYNC_STATE_FILE).exists():
         with open(SYNC_STATE_FILE) as f:
             return json.load(f)
-    return {"synced_archives": [], "synced_library_files": []}
+    return {"synced_archives": [], "synced_library_files": [], "synced_library_folders": {}}
 
 
 def save_sync_state(state: dict):
@@ -99,41 +99,52 @@ def get_bambuddy_archives(session: requests.Session) -> list:
     return archives
 
 
+def get_bambuddy_library_folders(session: requests.Session) -> list:
+    """Fetch the full folder tree from the Bambuddy file manager."""
+    print("  Fetching Bambuddy library folders...")
+    resp = session.get(
+        f"{BAMBUDDY_URL}/api/v1/library/folders",
+        headers=bambuddy_headers(),
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, list):
+        print(f"    ⚠️  Unexpected folder response: {str(data)[:200]}")
+        return []
+    print(f"    {len(data)} root folder(s) found")
+    return data
+
+
+def _flatten_folders(folders: list, parent_path: str = "") -> list[dict]:
+    """Recursively flatten the Bambuddy folder tree into a list with full path."""
+    result = []
+    for folder in folders:
+        path = f"{parent_path}/{folder['name']}" if parent_path else folder["name"]
+        result.append({**folder, "_full_path": path})
+        children = folder.get("children", [])
+        if children:
+            result.extend(_flatten_folders(children, path))
+    return result
+
+
 def get_bambuddy_library_files(session: requests.Session) -> list:
-    """Fetch all files from the Bambuddy file manager library."""
-    files = []
-    page = 1
+    """Fetch all files from the Bambuddy file manager (all folders, not just root)."""
     print("  Fetching Bambuddy library files...")
-    while True:
-        resp = session.get(
-            f"{BAMBUDDY_URL}/api/v1/library/files/",
-            params={"page": page, "per_page": PAGE_SIZE},
-            headers=bambuddy_headers(),
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        # Handle all response shapes: plain list, or dict with various keys
-        if isinstance(data, list):
-            batch = data
-        elif isinstance(data, dict):
-            # Try common key names
-            batch = data.get("files") or data.get("items") or data.get("data") or data.get("results") or []
-            # If still empty, check if the dict itself looks like a single file
-            if not batch and "id" in data:
-                batch = [data]
-        else:
-            batch = []
-        if page == 1 and not batch:
-            # Debug: show what we actually got
-            print(f"    ⚠️  Library returned unexpected response: {str(data)[:200]}")
-        files.extend(batch)
-        print(f"    Page {page}: {len(batch)} files (total so far: {len(files)})")
-        total = data.get("total", len(files)) if isinstance(data, dict) else len(files)
-        if len(files) >= total or not batch:
-            break
-        page += 1
-    return files
+    # include_root=False + no folder_id → returns every file regardless of folder
+    resp = session.get(
+        f"{BAMBUDDY_URL}/api/v1/library/files",
+        params={"include_root": "false"},
+        headers=bambuddy_headers(),
+        timeout=60,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, list):
+        print(f"    ⚠️  Library returned unexpected response: {str(data)[:200]}")
+        return []
+    print(f"    {len(data)} library file(s) found")
+    return data
 
 
 def download_bambuddy_archive(session: requests.Session, archive_id: int, dest: Path):
@@ -204,12 +215,14 @@ def get_existing_manyfold_models(session: requests.Session) -> set:
     return names
 
 
-def create_manyfold_model(session: requests.Session, name: str):
+def create_manyfold_model(session: requests.Session, name: str, collection_at_id: str | None = None):
     """Create an empty model in Manyfold and return its slug/ID."""
-    payload = {
+    payload: dict = {
         "name": name,
         "library_id": MANYFOLD_LIBRARY_ID,
     }
+    if collection_at_id:
+        payload["isPartOf"] = [{"@id": collection_at_id}]
     resp = session.post(
         f"{MANYFOLD_URL}/models",
         json=payload,
@@ -225,6 +238,52 @@ def create_manyfold_model(session: requests.Session, name: str):
     model_id = at_id.rstrip("/").split("/")[-1] if at_id else None
     return model_id
 
+
+
+def get_existing_manyfold_collections(session: requests.Session) -> dict:
+    """Return a dict of collection name → collection @id URL for existing Manyfold collections."""
+    collections = {}
+    page = 1
+    print("  Fetching existing Manyfold collections...")
+    while True:
+        resp = session.get(
+            f"{MANYFOLD_URL}/collections",
+            params={"page": page},
+            headers=manyfold_headers(),
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        members = data.get("member", [])
+        for m in members:
+            name = m.get("name", "")
+            at_id = m.get("@id", "")
+            if name and at_id:
+                collections[name] = at_id
+        total = data.get("totalItems", 0)
+        print(f"    Page {page}: {len(members)} collections (total so far: {len(collections)}/{total})")
+        if not members or len(collections) >= total:
+            break
+        page += 1
+    return collections
+
+
+def create_manyfold_collection(session: requests.Session, name: str, parent_at_id: str | None = None) -> str | None:
+    """Create a Manyfold collection and return its @id URL."""
+    payload: dict = {"name": name}
+    if parent_at_id:
+        payload["isPartOf"] = {"@id": parent_at_id}
+    resp = session.post(
+        f"{MANYFOLD_URL}/collections",
+        json=payload,
+        headers={**manyfold_headers(), "Content-Type": "application/vnd.manyfold.v0+json"},
+        timeout=30,
+    )
+    if not resp.ok:
+        print(f"    ⚠️  Failed to create collection '{name}': {resp.status_code} {resp.text[:200]}")
+        return None
+    data = resp.json()
+    return data.get("@id")
 
 
 def upload_file_to_manyfold_model(
@@ -323,20 +382,61 @@ def sync_library_files(
     dry_run: bool,
 ) -> int:
     lib_files = get_bambuddy_library_files(session)
-    synced_ids: set = set(state["synced_library_files"])
+    flat_folders = _flatten_folders(get_bambuddy_library_folders(session))
+    # Map bambuddy folder_id → folder dict (with _full_path)
+    folder_by_id: dict[int, dict] = {f["id"]: f for f in flat_folders}
+
+    synced_ids: set = set(state.get("synced_library_files", []))
+    # Map bambuddy folder_id → manyfold collection @id URL (JSON stores keys as strings)
+    folder_to_collection: dict[int, str] = {int(k): v for k, v in state.get("synced_library_folders", {}).items()}
+
     new_count = 0
 
     # Filter to supported extensions
+    STRIP_EXTS = {".gcode", ".3mf", ".stl", ".obj", ".step", ".stp"}
     supported = [
         f for f in lib_files
         if Path(f.get("filename", f.get("name", ""))).suffix.lower() in LIBRARY_EXTENSIONS
     ]
     print(f"\n📁 Syncing {len(supported)}/{len(lib_files)} Bambuddy library files (filtered by extension)...")
 
+    if not dry_run:
+        existing_collections = get_existing_manyfold_collections(session)
+    else:
+        existing_collections = {}
+
+    def _ensure_collection(folder_id: int | None) -> str | None:
+        """Get or create the Manyfold collection for a Bambuddy folder, recursively."""
+        if folder_id is None:
+            return None
+        if folder_id in folder_to_collection:
+            return folder_to_collection[folder_id]
+
+        folder = folder_by_id.get(folder_id)
+        if not folder:
+            return None
+
+        # Ensure parent collection exists first
+        parent_at_id = _ensure_collection(folder.get("parent_id"))
+        col_name = folder["_full_path"]
+
+        if col_name in existing_collections:
+            at_id: str | None = existing_collections[col_name]
+        elif dry_run:
+            tqdm.write(f"  [dry-run] Would create collection '{col_name}'")
+            return None
+        else:
+            at_id = create_manyfold_collection(session, col_name, parent_at_id)
+            if at_id:
+                existing_collections[col_name] = at_id
+
+        if at_id:
+            folder_to_collection[folder_id] = at_id
+        return at_id
+
     for file_entry in tqdm(supported, unit="file"):
         file_id = file_entry.get("id")
         filename = file_entry.get("filename") or file_entry.get("name", f"file_{file_id}")
-        STRIP_EXTS = {".gcode", ".3mf", ".stl", ".obj", ".step", ".stp"}
         model_name = filename
         while Path(model_name).suffix.lower() in STRIP_EXTS:
             model_name = Path(model_name).stem
@@ -350,7 +450,11 @@ def sync_library_files(
             synced_ids.add(file_id)
             continue
 
-        tqdm.write(f"  ↓  Downloading: {filename}")
+        folder_id = file_entry.get("folder_id")
+        folder_path = folder_by_id[folder_id]["_full_path"] if folder_id in folder_by_id else None
+        label = f"{folder_path}/{model_name}" if folder_path else model_name
+
+        tqdm.write(f"  ↓  Downloading: {label}")
         with tempfile.TemporaryDirectory() as tmpdir:
             dest = Path(tmpdir) / filename
             try:
@@ -360,13 +464,14 @@ def sync_library_files(
                 continue
 
             if not dry_run:
-                model_id = create_manyfold_model(session, model_name)
+                collection_at_id = _ensure_collection(folder_id)
+                model_id = create_manyfold_model(session, model_name, collection_at_id)
                 if not model_id:
                     continue
-                tqdm.write(f"  ↑  Uploading to Manyfold: {model_name}")
+                tqdm.write(f"  ↑  Uploading to Manyfold: {label}")
                 ok = upload_file_to_manyfold_model(session, model_id, dest, dry_run)
             else:
-                tqdm.write(f"  [dry-run] Would create model '{model_name}' and upload {dest.name}")
+                tqdm.write(f"  [dry-run] Would create model '{label}' and upload {dest.name}")
                 ok = True
 
         if ok:
@@ -375,6 +480,8 @@ def sync_library_files(
             new_count += 1
 
     state["synced_library_files"] = list(synced_ids)
+    # Persist int keys as strings for JSON serialisation
+    state["synced_library_folders"] = {str(k): v for k, v in folder_to_collection.items()}
     return new_count
 
 
