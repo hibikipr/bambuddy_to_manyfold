@@ -155,3 +155,7 @@ at the start of each load/sync.
 - The script always sends `isPartOf` (an empty array when there's no collection).
   Omitting it triggers a `nil` error in Manyfold's upload job.
 - Supported library extensions: `.3mf`, `.stl`, `.obj`, `.step`, `.stp`.
+
+---
+
+🤖 Built with [Claude Code](https://claude.com/claude-code)

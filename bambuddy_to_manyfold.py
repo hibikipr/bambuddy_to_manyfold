@@ -12,6 +12,8 @@ Usage:
 
 Bambuddy API docs:   http://<your-bambuddy>:8000/docs
 Manyfold API docs:   http://<your-manyfold>/api
+
+🤖 Built with Claude Code (https://claude.com/claude-code)
 """
 
 import argparse

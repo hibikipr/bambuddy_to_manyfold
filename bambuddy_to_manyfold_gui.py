@@ -9,6 +9,8 @@ Requirements:
 
 Usage:
     python bambuddy_to_manyfold_gui.py
+
+🤖 Built with Claude Code (https://claude.com/claude-code)
 """
 
 import io
