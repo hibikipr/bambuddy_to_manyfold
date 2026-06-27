@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Sync state — local tracking of what's already been uploaded (may contain
+# synced-item IDs / MakerWorld→Manyfold model mappings); not for version control.
+bambuddy_sync_state.json
+*_sync_state.json
+
+# GUI config saved to the project dir if SYNC_STATE_FILE points here
+.bambuddy_to_manyfold_gui.json
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/
