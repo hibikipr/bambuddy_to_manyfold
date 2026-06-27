@@ -71,48 +71,62 @@ def bambuddy_headers() -> dict:
     return {"X-API-Key": BAMBUDDY_API_KEY, "Accept": "application/json"}
 
 
-def get_bambuddy_archives(session: requests.Session) -> list[dict]:
+def get_bambuddy_archives(session: requests.Session) -> list:
     """Fetch all print archives (completed 3MF prints) from Bambuddy."""
     archives = []
     page = 1
     print("  Fetching Bambuddy archives...")
     while True:
         resp = session.get(
-            f"{BAMBUDDY_URL}/api/v1/archives",
+            f"{BAMBUDDY_URL}/api/v1/archives/",
             params={"page": page, "per_page": PAGE_SIZE, "status": "success"},
             headers=bambuddy_headers(),
             timeout=30,
         )
         resp.raise_for_status()
         data = resp.json()
-        batch = data.get("archives", [])
+        # Handle plain list or paginated dict
+        if isinstance(data, list):
+            batch = data
+        else:
+            batch = data.get("archives", data.get("items", []))
         archives.extend(batch)
         print(f"    Page {page}: {len(batch)} archives (total so far: {len(archives)})")
-        if len(archives) >= data.get("total", 0) or not batch:
+        total = data.get("total", len(archives)) if isinstance(data, dict) else len(archives)
+        if not batch or len(archives) >= total:
             break
         page += 1
     return archives
 
 
-def get_bambuddy_library_files(session: requests.Session) -> list[dict]:
+def get_bambuddy_library_files(session: requests.Session) -> list:
     """Fetch all files from the Bambuddy file manager library."""
     files = []
     page = 1
     print("  Fetching Bambuddy library files...")
     while True:
         resp = session.get(
-            f"{BAMBUDDY_URL}/api/v1/library",
+            f"{BAMBUDDY_URL}/api/v1/library/files/",
             params={"page": page, "per_page": PAGE_SIZE},
             headers=bambuddy_headers(),
             timeout=30,
         )
         resp.raise_for_status()
         data = resp.json()
-        # The library endpoint may return a list or a paginated dict; handle both
+        # Handle all response shapes: plain list, or dict with various keys
         if isinstance(data, list):
             batch = data
+        elif isinstance(data, dict):
+            # Try common key names
+            batch = data.get("files") or data.get("items") or data.get("data") or data.get("results") or []
+            # If still empty, check if the dict itself looks like a single file
+            if not batch and "id" in data:
+                batch = [data]
         else:
-            batch = data.get("files", data.get("items", []))
+            batch = []
+        if page == 1 and not batch:
+            # Debug: show what we actually got
+            print(f"    ⚠️  Library returned unexpected response: {str(data)[:200]}")
         files.extend(batch)
         print(f"    Page {page}: {len(batch)} files (total so far: {len(files)})")
         total = data.get("total", len(files)) if isinstance(data, dict) else len(files)
@@ -139,7 +153,7 @@ def download_bambuddy_archive(session: requests.Session, archive_id: int, dest: 
 def download_bambuddy_library_file(session: requests.Session, file_id: int, dest: Path):
     """Stream-download a Bambuddy library file to a local path."""
     resp = session.get(
-        f"{BAMBUDDY_URL}/api/v1/library/{file_id}/download",
+        f"{BAMBUDDY_URL}/api/v1/library/files/{file_id}/download",
         headers=bambuddy_headers(),
         stream=True,
         timeout=120,
@@ -155,73 +169,62 @@ def download_bambuddy_library_file(session: requests.Session, file_id: int, dest
 def manyfold_headers() -> dict:
     return {
         "Authorization": f"Bearer {MANYFOLD_TOKEN}",
-        "Accept": "application/vnd.api+json",
+        "Accept": "application/vnd.manyfold.v0+json",
     }
 
 
-def get_existing_manyfold_models(session: requests.Session) -> set[str]:
+def get_existing_manyfold_models(session: requests.Session) -> set:
     """
-    Return a set of model names already in the target Manyfold library.
-    Used to skip duplicates.
+    Return a set of model names already in Manyfold.
+    Used to skip duplicates. Handles JSON-LD hydra:Collection format.
     """
     names = set()
     page = 1
     print("  Fetching existing Manyfold models...")
     while True:
         resp = session.get(
-            f"{MANYFOLD_URL}/api/v1/models",
-            params={"page[number]": page, "page[size]": 100,
-                    "filter[library_id]": MANYFOLD_LIBRARY_ID},
+            f"{MANYFOLD_URL}/models",
+            params={"page": page},
             headers=manyfold_headers(),
             timeout=30,
         )
-        if resp.status_code == 404:
-            # Older Manyfold without library filter — fetch all
-            resp = session.get(
-                f"{MANYFOLD_URL}/api/v1/models",
-                params={"page[number]": page, "page[size]": 100},
-                headers=manyfold_headers(),
-                timeout=30,
-            )
         resp.raise_for_status()
         data = resp.json()
-        models = data.get("data", [])
-        for m in models:
-            name = m.get("attributes", {}).get("name", "")
+        # Manyfold returns JSON-LD with a "member" array
+        members = data.get("member", [])
+        for m in members:
+            name = m.get("name", "")
             if name:
                 names.add(name)
-        meta = data.get("meta", {})
-        total_pages = meta.get("total_pages", 1)
-        print(f"    Page {page}/{total_pages}: {len(models)} models")
-        if page >= total_pages or not models:
+        total = data.get("totalItems", 0)
+        print(f"    Page {page}: {len(members)} models (total so far: {len(names)}/{total})")
+        if not members or len(names) >= total:
             break
         page += 1
     return names
 
 
-def create_manyfold_model(session: requests.Session, name: str) -> str | None:
-    """Create an empty model in Manyfold and return its ID."""
+def create_manyfold_model(session: requests.Session, name: str):
+    """Create an empty model in Manyfold and return its slug/ID."""
     payload = {
-        "data": {
-            "type": "model",
-            "attributes": {"name": name},
-            "relationships": {
-                "library": {
-                    "data": {"type": "library", "id": str(MANYFOLD_LIBRARY_ID)}
-                }
-            },
-        }
+        "name": name,
+        "library_id": MANYFOLD_LIBRARY_ID,
     }
     resp = session.post(
-        f"{MANYFOLD_URL}/api/v1/models",
+        f"{MANYFOLD_URL}/models",
         json=payload,
-        headers={**manyfold_headers(), "Content-Type": "application/vnd.api+json"},
+        headers={**manyfold_headers(), "Content-Type": "application/vnd.manyfold.v0+json"},
         timeout=30,
     )
     if not resp.ok:
         print(f"    ⚠️  Failed to create model '{name}': {resp.status_code} {resp.text[:200]}")
         return None
-    return resp.json()["data"]["id"]
+    data = resp.json()
+    # Manyfold returns JSON-LD; ID is in "@id" as a URL path like /models/abc123
+    at_id = data.get("@id", "")
+    model_id = at_id.rstrip("/").split("/")[-1] if at_id else None
+    return model_id
+
 
 
 def upload_file_to_manyfold_model(
@@ -237,14 +240,14 @@ def upload_file_to_manyfold_model(
 
     with open(file_path, "rb") as f:
         resp = session.post(
-            f"{MANYFOLD_URL}/api/v1/model_files",
+            f"{MANYFOLD_URL}/upload",
             headers={
                 "Authorization": f"Bearer {MANYFOLD_TOKEN}",
-                "Accept": "application/vnd.api+json",
+                "Accept": "application/vnd.manyfold.v0+json",
             },
             files={"file": (file_path.name, f)},
             data={
-                "model_file[model_id]": model_id,
+                "model_id": model_id,
             },
             timeout=300,
         )
@@ -259,7 +262,7 @@ def upload_file_to_manyfold_model(
 def sync_archives(
     session: requests.Session,
     state: dict,
-    existing_names: set[str],
+    existing_names: set,
     dry_run: bool,
 ) -> int:
     archives = get_bambuddy_archives(session)
@@ -270,8 +273,11 @@ def sync_archives(
     for archive in tqdm(archives, unit="archive"):
         archive_id = archive.get("id")
         name = archive.get("name") or archive.get("filename", f"archive_{archive_id}")
-        # Strip extension for the model name
-        model_name = Path(name).stem
+        # Strip all known print/slicer extensions from the model name
+        STRIP_EXTS = {".gcode", ".3mf", ".stl", ".obj", ".step", ".stp"}
+        model_name = name
+        while Path(model_name).suffix.lower() in STRIP_EXTS:
+            model_name = Path(model_name).stem
 
         if archive_id in synced_ids:
             tqdm.write(f"  ⏭  Already synced: {model_name}")
@@ -313,7 +319,7 @@ def sync_archives(
 def sync_library_files(
     session: requests.Session,
     state: dict,
-    existing_names: set[str],
+    existing_names: set,
     dry_run: bool,
 ) -> int:
     lib_files = get_bambuddy_library_files(session)
@@ -330,7 +336,10 @@ def sync_library_files(
     for file_entry in tqdm(supported, unit="file"):
         file_id = file_entry.get("id")
         filename = file_entry.get("filename") or file_entry.get("name", f"file_{file_id}")
-        model_name = Path(filename).stem
+        STRIP_EXTS = {".gcode", ".3mf", ".stl", ".obj", ".step", ".stp"}
+        model_name = filename
+        while Path(model_name).suffix.lower() in STRIP_EXTS:
+            model_name = Path(model_name).stem
 
         if file_id in synced_ids:
             tqdm.write(f"  ⏭  Already synced: {model_name}")
@@ -376,7 +385,7 @@ def check_connections(session: requests.Session):
     # Bambuddy
     try:
         r = session.get(
-            f"{BAMBUDDY_URL}/api/v1/printers",
+            f"{BAMBUDDY_URL}/api/v1/system/info",
             headers=bambuddy_headers(),
             timeout=10,
         )
@@ -389,8 +398,8 @@ def check_connections(session: requests.Session):
     # Manyfold
     try:
         r = session.get(
-            f"{MANYFOLD_URL}/api/v1/models",
-            params={"page[size]": 1},
+            f"{MANYFOLD_URL}/models",
+            params={"page": 1},
             headers=manyfold_headers(),
             timeout=10,
         )
