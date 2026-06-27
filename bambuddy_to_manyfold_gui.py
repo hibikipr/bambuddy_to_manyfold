@@ -139,9 +139,11 @@ CHECK_OFF = "☐"
 
 class CheckTree:
     """
-    A ttk.Treeview with virtual per-row checkboxes.
+    A ttk.Treeview with virtual per-row checkboxes, backed by a data model so
+    rows can be sorted (name/date) and filtered (hide synced) without losing
+    check state.
 
-    Columns: "check" (30 px), "name" (stretch), "status" (70 px).
+    Columns: "check" (30 px), "name" (stretch), "date" (90 px), "status" (70 px).
     Clicking any cell on a row toggles its checkbox.
     """
 
@@ -151,15 +153,17 @@ class CheckTree:
 
         self._tree = ttk.Treeview(
             frame,
-            columns=("check", "name", "status"),
+            columns=("check", "name", "date", "status"),
             show="headings",
             selectmode="none",
         )
         self._tree.heading("check",  text="")
-        self._tree.heading("name",   text="Name")
-        self._tree.heading("status", text="Status")
+        self._tree.heading("name",   text="Name",   command=lambda: self._header_sort("name"))
+        self._tree.heading("date",   text="Date",   command=lambda: self._header_sort("date"))
+        self._tree.heading("status", text="Status", command=lambda: self._header_sort("status"))
         self._tree.column("check",  width=30,  stretch=False, anchor="center")
         self._tree.column("name",   stretch=True,             anchor="w")
+        self._tree.column("date",   width=90,  stretch=False, anchor="center")
         self._tree.column("status", width=70,  stretch=False, anchor="center")
 
         sb = ttk.Scrollbar(frame, orient="vertical", command=self._tree.yview)
@@ -167,46 +171,96 @@ class CheckTree:
         self._tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
-        # Tag for already-synced rows
         self._tree.tag_configure("synced", foreground="#888888")
-
-        # Toggle on any click
         self._tree.bind("<Button-1>", self._on_click)
 
-        # iid → bool (checked state)
-        self._checks: dict[str, bool] = {}
+        # iid → {name, date, status, checked}
+        self._rows: dict[str, dict] = {}
+        self._order: list[str] = []          # insertion order
+        self._sort_key = "name"
+        self._sort_reverse = False
+        self._hide_synced = False
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def clear(self):
         self._tree.delete(*self._tree.get_children())
-        self._checks.clear()
+        self._rows.clear()
+        self._order.clear()
 
-    def add_row(self, iid: str, name: str, status: str, checked: bool = True):
-        self._checks[iid] = checked
-        tags = ("synced",) if status == "synced" else ()
-        self._tree.insert(
-            "", "end", iid=iid,
-            values=(CHECK_ON if checked else CHECK_OFF, name, status),
-            tags=tags,
-        )
+    def add_row(self, iid: str, name: str, status: str, checked: bool = True, date: str = ""):
+        self._rows[iid] = {"name": name, "date": date or "", "status": status, "checked": checked}
+        self._order.append(iid)
+        # Defer rendering; caller calls render() once after bulk-adding.
+
+    def render(self):
+        """Rebuild the visible tree from the data model (applies sort + filter)."""
+        self._tree.delete(*self._tree.get_children())
+        visible = [iid for iid in self._order
+                   if not (self._hide_synced and self._rows[iid]["status"] == "synced")]
+
+        def key(iid):
+            r = self._rows[iid]
+            if self._sort_key == "date":
+                return (r["date"], r["name"].lower())
+            if self._sort_key == "status":
+                return (r["status"], r["name"].lower())
+            return r["name"].lower()
+
+        visible.sort(key=key, reverse=self._sort_reverse)
+        for iid in visible:
+            r = self._rows[iid]
+            tags = ("synced",) if r["status"] == "synced" else ()
+            self._tree.insert(
+                "", "end", iid=iid,
+                values=(CHECK_ON if r["checked"] else CHECK_OFF, r["name"],
+                        self._fmt_date(r["date"]), r["status"]),
+                tags=tags,
+            )
+
+    def set_sort(self, key: str, reverse: bool = False):
+        self._sort_key = key if key in ("name", "date", "status") else "name"
+        self._sort_reverse = reverse
+        self.render()
+
+    def set_hide_synced(self, hide: bool):
+        self._hide_synced = hide
+        self.render()
 
     def set_all(self, checked: bool):
+        # Only affects currently-visible rows.
         for iid in self._tree.get_children():
-            self._checks[iid] = checked
+            self._rows[iid]["checked"] = checked
             self._tree.set(iid, "check", CHECK_ON if checked else CHECK_OFF)
 
     def checked_iids(self) -> list[str]:
-        return [iid for iid, v in self._checks.items() if v]
+        return [iid for iid, r in self._rows.items() if r["checked"]]
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _fmt_date(value: str) -> str:
+        # ISO timestamp → YYYY-MM-DD for display; pass through anything else.
+        return value[:10] if len(value) >= 10 else value
+
+    def _header_sort(self, key: str):
+        # Toggle direction if re-clicking the same column.
+        if self._sort_key == key:
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_key = key
+            self._sort_reverse = False
+        self.render()
+
     def _on_click(self, event: tk.Event):
-        iid = self._tree.identify_row(event.y)
-        if not iid:
+        # Ignore clicks on the header row.
+        if self._tree.identify_region(event.x, event.y) == "heading":
             return
-        new_state = not self._checks.get(iid, True)
-        self._checks[iid] = new_state
+        iid = self._tree.identify_row(event.y)
+        if not iid or iid not in self._rows:
+            return
+        new_state = not self._rows[iid]["checked"]
+        self._rows[iid]["checked"] = new_state
         self._tree.set(iid, "check", CHECK_ON if new_state else CHECK_OFF)
 
 
@@ -322,6 +376,12 @@ class App(tk.Tk):
             variable=self._enrich_var
         ).pack(side="left", padx=(0, 12))
 
+        self._group_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            top_btn_frame, text="Group MakerWorld profiles into one model",
+            variable=self._group_var
+        ).pack(side="left", padx=(0, 12))
+
         self._debug_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             top_btn_frame, text="Log debug", variable=self._debug_var
@@ -355,8 +415,32 @@ class App(tk.Tk):
         paned.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # ── Model selection pane ──────────────────────────────────────────────
-        sel_outer = ttk.LabelFrame(paned, text="Model selection  —  click a row to toggle")
+        sel_outer = ttk.LabelFrame(paned, text="Model selection  —  click a row to toggle (or a column header to sort)")
         paned.add(sel_outer, weight=2)
+
+        # Sort + filter controls (apply to both lists)
+        view_bar = ttk.Frame(sel_outer)
+        view_bar.pack(fill="x", padx=4, pady=(4, 0))
+        ttk.Label(view_bar, text="Sort by:").pack(side="left")
+        self._sort_var = tk.StringVar(value="Name")
+        sort_combo = ttk.Combobox(
+            view_bar, textvariable=self._sort_var, state="readonly", width=10,
+            values=("Name", "Date", "Status"),
+        )
+        sort_combo.pack(side="left", padx=(4, 6))
+        sort_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_view())
+
+        self._sort_desc_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            view_bar, text="Descending", variable=self._sort_desc_var,
+            command=self._apply_view,
+        ).pack(side="left", padx=(0, 12))
+
+        self._hide_synced_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            view_bar, text="Hide already-synced", variable=self._hide_synced_var,
+            command=self._apply_view,
+        ).pack(side="left")
 
         # Archives sub-section
         arch_hdr = ttk.Frame(sel_outer)
@@ -586,7 +670,8 @@ class App(tk.Tk):
                 stem = Path(stem).stem
             status  = "synced" if aid in synced_archive_ids else "new"
             checked = status != "synced"
-            self._arch_tree.add_row(str(aid), stem, status, checked)
+            date    = a.get("created_at") or a.get("created") or ""
+            self._arch_tree.add_row(str(aid), stem, status, checked, date=date)
 
         self._arch_label.configure(
             text=f"Archives  ({len(archives)} total, "
@@ -606,15 +691,30 @@ class App(tk.Tk):
             display = lf.get("_display_name", f"file_{fid}")
             status  = "synced" if fid in synced_file_ids else "new"
             checked = status != "synced"
-            self._lib_tree.add_row(str(fid), display, status, checked)
+            date    = lf.get("created_at") or lf.get("created") or ""
+            self._lib_tree.add_row(str(fid), display, status, checked, date=date)
 
         self._lib_label.configure(
             text=f"Library files  ({len(supported)} supported, "
                  f"{sum(1 for lf in supported if lf.get('id') in synced_file_ids)} already synced)"
         )
 
+        # Apply the current sort/filter and render both trees.
+        self._apply_view()
+
         if archives or lib_files:
             self._run_btn.configure(state="normal")
+
+    def _apply_view(self):
+        """Push the current sort key / direction / hide-synced setting to both lists."""
+        key = {"Name": "name", "Date": "date", "Status": "status"}.get(self._sort_var.get(), "name")
+        reverse = self._sort_desc_var.get()
+        hide = self._hide_synced_var.get()
+        for tree in (self._arch_tree, self._lib_tree):
+            tree._hide_synced = hide
+            tree._sort_key = key
+            tree._sort_reverse = reverse
+            tree.render()
 
     # ── Sync execution ────────────────────────────────────────────────────────
 
@@ -639,6 +739,9 @@ class App(tk.Tk):
         force = self._force_var.get()
         add_links = self._links_var.get()
         enrich = self._enrich_var.get()
+        group = self._group_var.get()
+        # Refresh the lists afterwards (unless it was a dry run — nothing changed).
+        self._reload_after_sync = not dry_run
         self._running = True
         self._load_btn.configure(state="disabled")
         self._run_btn.configure(state="disabled")
@@ -647,7 +750,7 @@ class App(tk.Tk):
 
         threading.Thread(
             target=self._sync_worker,
-            args=(cfg, dry_run, create_missing, force, add_links, enrich, selected_archive_ids, selected_file_ids),
+            args=(cfg, dry_run, create_missing, force, add_links, enrich, group, selected_archive_ids, selected_file_ids),
             daemon=True,
         ).start()
 
@@ -661,6 +764,11 @@ class App(tk.Tk):
         self._load_btn.configure(state="normal")
         self._run_btn.configure(state="normal")
         self._stop_btn.configure(state="disabled")
+        # Auto-reload so the lists reflect the new synced statuses.
+        if getattr(self, "_reload_after_sync", False):
+            self._reload_after_sync = False
+            self._append_log("\n🔄 Reloading models to refresh statuses…\n")
+            self.after(500, self._start_load)
 
     def _sync_worker(
         self,
@@ -670,6 +778,7 @@ class App(tk.Tk):
         force: bool,
         add_links: bool,
         enrich: bool,
+        group: bool,
         selected_archive_ids: set[int],
         selected_file_ids: set[int],
     ):
@@ -718,6 +827,7 @@ class App(tk.Tk):
                     force=force,
                     add_source_links=add_links,
                     enrich_from_makerworld=enrich,
+                    group_makerworld_profiles=group,
                 )
 
                 if not dry_run:

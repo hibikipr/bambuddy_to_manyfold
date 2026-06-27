@@ -14,6 +14,17 @@ re-runs only upload new items.
 
 ---
 
+## Tested with
+
+- **Bambuddy** v0.2.4.7
+- **Manyfold** v0.142.0 (`dbd95979`)
+
+Other versions may work but aren't verified — the script depends on Manyfold's
+v0 API (model/file Tus uploads, collections, creators) and Bambuddy's MakerWorld
++ library endpoints, which can change between releases.
+
+---
+
 ## Requirements
 
 ```bash
@@ -91,6 +102,9 @@ python3 bambuddy_to_manyfold.py --no-links
 
 # Don't fetch MakerWorld details (description, tags, cover image)
 python3 bambuddy_to_manyfold.py --no-enrich
+
+# Don't group multiple MakerWorld profiles of one design into a single model
+python3 bambuddy_to_manyfold.py --no-group
 ```
 
 ### Flags
@@ -102,6 +116,7 @@ python3 bambuddy_to_manyfold.py --no-enrich
 | `--force` | Ignores the local sync-state file so already-recorded items are re-processed. The live "already in Manyfold" check still applies, so this won't create duplicates of models that genuinely synced. |
 | `--no-links` | Skips attaching MakerWorld source URLs as links on synced models. |
 | `--no-enrich` | Skips fetching MakerWorld details (description, tags, cover image). |
+| `--no-group` | Syncs each MakerWorld profile as its own model instead of grouping profiles of the same design into one. |
 
 A convenience wrapper, [`run_sync.sh`](run_sync.sh), exports the env vars and
 runs the script. Edit it with your values, then `./run_sync.sh [--dry-run]`.
@@ -121,8 +136,11 @@ Workflow:
 2. Click **⟳ Load models** to fetch archives and library files from Bambuddy.
    Items already in the sync state show greyed out and pre-unchecked.
 3. In the two lists, tick the models you want. Each section has **All** / **None**
-   buttons, and you can click any row to toggle it.
-4. Click **▶ Run sync**.
+   buttons, and you can click any row to toggle it. Sort with the **Sort by**
+   (Name / Date / Status) control or by clicking a column header, toggle
+   **Descending**, and tick **Hide already-synced** to focus on new items.
+4. Click **▶ Run sync**. When it finishes, the lists reload automatically so
+   statuses update (newly-synced items show as `synced`).
 
 ### Options
 
@@ -136,6 +154,10 @@ Workflow:
 - **Fetch MakerWorld details (description + cover)** — pull the model's name,
   description, tags, creator, and cover image from MakerWorld and apply them to
   the Manyfold model (the cover is also set as the model's preview image).
+- **Group MakerWorld profiles into one model** — Bambuddy stores each imported
+  MakerWorld profile (plate) as a separate file. With this on, profiles of the
+  same design are combined into a single Manyfold model holding all the plate
+  files, instead of one model per profile.
 - **Log debug** — show verbose diagnostics (pagination, scope probe, etc.).
 
 Output streams live into the log pane, colour-coded, with a timestamped marker
@@ -155,7 +177,14 @@ at the start of each load/sync.
   (`/upload`, resumable, chunked), then `POST /models` references the upload to
   create the model asynchronously (returns `202 Accepted`).
 - **State** is tracked in the sync-state JSON: synced archive IDs, synced library
-  file IDs, and a Bambuddy-folder → Manyfold-collection mapping.
+  file IDs, a Bambuddy-folder → Manyfold-collection mapping, and a MakerWorld
+  design-id → Manyfold-model-id mapping (so later profile imports of a design are
+  added to its existing grouped model).
+- **Grouping** keys on the MakerWorld design id (the number in `/models/{id}`,
+  shared by every profile of a design). The first profile creates one Manyfold
+  model — named/enriched from the design — and the remaining profiles are added
+  to it as files. Profiles imported in a later run attach to the same model via
+  the stored design-id mapping.
 - **MakerWorld links + details** — files imported into Bambuddy via "Import from
   MakerWorld" carry a source URL. The sync fetches these from
   `GET /makerworld/recent-imports` and, after a model is created, PATCHes the URL
@@ -185,6 +214,14 @@ at the start of each load/sync.
   though it didn't land; use `--force` (or the GUI checkbox) to re-push it.
 - The script always sends `isPartOf` (an empty array when there's no collection).
   Omitting it triggers a `nil` error in Manyfold's upload job.
+- **Rate limiting:** Manyfold caps model creation and file-adding at **10 per 3
+  minutes** each, returning `429`. The script waits and retries (long enough to
+  ride out the full 3-minute window). To minimise how often it hits the limit,
+  all files of a grouped MakerWorld design are sent in a **single request** (one
+  model with many files, rather than one request per file). Even so, a large
+  first-time sync of many *separate* models is slow by design (~10 new models per
+  3 minutes). Anything that still can't be added is left unsynced and retried on
+  the next run — nothing is silently lost.
 - Supported library extensions: `.3mf`, `.stl`, `.obj`, `.step`, `.stp`.
 
 ---
