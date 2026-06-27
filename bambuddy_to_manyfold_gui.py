@@ -13,13 +13,24 @@ Usage:
 🤖 Built with Claude Code (https://claude.com/claude-code)
 """
 
+import sys
+
+# Requires Python 3.10+ (PEP 604 ``X | None`` hints, here and in the synced
+# bambuddy_to_manyfold module). Fail clearly rather than with a cryptic
+# TypeError on macOS's bundled /usr/bin/python3 (3.9).
+if sys.version_info < (3, 10):
+    sys.exit(
+        f"❌ Python 3.10+ required, but this is {sys.version.split()[0]} "
+        f"({sys.executable}).\n"
+        f"   Use the python.org build, e.g.: python3.14 bambuddy_to_manyfold_gui.py"
+    )
+
 import base64
 import io
 import json
 import os
 import queue
 import struct
-import sys
 import threading
 import tkinter as tk
 import zlib
@@ -51,10 +62,10 @@ def _make_icon_png(size: int = 64) -> bytes:
     side = 24 * f  # vertical drop of the side faces
 
     faces = [
-        # (origin, u, v, colour)  — top (lightest), left (mid), right (darkest)
-        (T, (L[0] - T[0], L[1] - T[1]), (R[0] - T[0], R[1] - T[1]), (108, 182, 255)),
-        (L, (0, side), (B[0] - L[0], B[1] - L[1]), (58, 120, 194)),
-        (R, (0, side), (B[0] - R[0], B[1] - R[1]), (43, 90, 147)),
+        # (origin, u, v, colour)  — Bambu-green cube: top light, left mid, right dark
+        (T, (L[0] - T[0], L[1] - T[1]), (R[0] - T[0], R[1] - T[1]), (0, 198, 77)),
+        (L, (0, side), (B[0] - L[0], B[1] - L[1]), (0, 174, 66)),
+        (R, (0, side), (B[0] - R[0], B[1] - R[1]), (0, 148, 56)),
     ]
 
     for y in range(s):
@@ -129,6 +140,34 @@ class _QueueWriter(io.TextIOBase):
 
     def flush(self):
         pass
+
+
+# ── Bambuddy theme palette (matches the web UI's Tailwind config) ─────────────
+
+BG          = "#1a1a1a"   # bambu-dark
+CARD        = "#2d2d2d"   # bambu-dark-secondary / card
+TERTIARY    = "#3d3d3d"   # bambu-dark-tertiary
+GREEN       = "#00ae42"   # bambu-green (primary accent)
+GREEN_LIGHT = "#00c64d"
+GREEN_DARK  = "#009438"
+GRAY        = "#808080"
+GRAY_LIGHT  = "#a0a0a0"
+GRAY_DARK   = "#4a4a4a"
+FG          = "#e8e8e8"   # primary text
+DANGER      = "#e0533d"   # stop / destructive
+
+
+def _ui_font_family() -> str:
+    """Prefer Inter (Bambuddy's font), else a sensible system sans-serif."""
+    try:
+        from tkinter import font as _f
+        avail = set(_f.families())
+        for fam in ("Inter", "SF Pro Text", "Helvetica Neue", "Segoe UI", "Arial"):
+            if fam in avail:
+                return fam
+    except Exception:
+        pass
+    return "Helvetica"
 
 
 # ── Checkbox Treeview helper ──────────────────────────────────────────────────
@@ -271,7 +310,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("Bambuddy → Manyfold Sync")
         self.resizable(True, True)
-        self.minsize(720, 640)
+        self.minsize(760, 660)
         self._set_app_icon()
 
         self._cfg = load_gui_config()
@@ -282,9 +321,95 @@ class App(tk.Tk):
         self._archives: list[dict] = []
         self._lib_files: list[dict] = []
 
+        self._apply_theme()
         self._build_ui()
         self._load_fields()
         self._poll_log()
+
+    def _apply_theme(self):
+        """Style the app to match Bambuddy's dark, Bambu-green UI."""
+        fam = _ui_font_family()
+        self._font = (fam, 11)
+        self._font_bold = (fam, 11, "bold")
+        self._mono = (fam, 10)
+
+        self.configure(bg=BG)
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")  # honours colour options (unlike aqua/native)
+        except tk.TclError:
+            pass
+
+        style.configure(".", background=BG, foreground=FG, font=self._font,
+                        fieldbackground=CARD, bordercolor=GRAY_DARK,
+                        lightcolor=CARD, darkcolor=CARD, troughcolor=CARD)
+        style.configure("TFrame", background=BG)
+        style.configure("TLabel", background=BG, foreground=FG)
+        style.configure("Muted.TLabel", background=BG, foreground=GRAY_LIGHT)
+        style.configure("TLabelframe", background=BG, bordercolor=GRAY_DARK, relief="solid")
+        style.configure("TLabelframe.Label", background=BG, foreground=GREEN_LIGHT, font=self._font_bold)
+
+        # Buttons
+        style.configure("TButton", background=TERTIARY, foreground=FG,
+                        bordercolor=GRAY_DARK, focuscolor=BG, padding=(10, 5), relief="flat")
+        style.map("TButton",
+                  background=[("active", GRAY_DARK), ("disabled", CARD)],
+                  foreground=[("disabled", GRAY)])
+        # Primary (green) action buttons
+        style.configure("Accent.TButton", background=GREEN, foreground="#0a0a0a",
+                        font=self._font_bold, padding=(12, 6), relief="flat")
+        style.map("Accent.TButton",
+                  background=[("active", GREEN_LIGHT), ("disabled", GREEN_DARK)],
+                  foreground=[("disabled", "#5a5a5a")])
+        # Stop button (muted danger)
+        style.configure("Danger.TButton", background=TERTIARY, foreground=DANGER, relief="flat")
+        style.map("Danger.TButton", background=[("active", GRAY_DARK)])
+
+        # Inputs
+        style.configure("TEntry", fieldbackground=CARD, foreground=FG,
+                        insertcolor=FG, bordercolor=GRAY_DARK, padding=4)
+        style.map("TEntry", bordercolor=[("focus", GREEN)])
+        style.configure("TCombobox", fieldbackground=CARD, background=TERTIARY,
+                        foreground=FG, arrowcolor=FG, bordercolor=GRAY_DARK, padding=4)
+        style.map("TCombobox", fieldbackground=[("readonly", CARD)],
+                  foreground=[("readonly", FG)])
+        # Combobox dropdown list colours (classic-Tk option DB)
+        self.option_add("*TCombobox*Listbox.background", CARD)
+        self.option_add("*TCombobox*Listbox.foreground", FG)
+        self.option_add("*TCombobox*Listbox.selectBackground", GREEN)
+        self.option_add("*TCombobox*Listbox.selectForeground", "#0a0a0a")
+
+        # Checkbuttons
+        style.configure("TCheckbutton", background=BG, foreground=FG, focuscolor=BG)
+        style.map("TCheckbutton",
+                  background=[("active", BG)],
+                  indicatorcolor=[("selected", GREEN), ("!selected", CARD)],
+                  foreground=[("disabled", GRAY)])
+
+        # Treeview (the model lists)
+        style.configure("Treeview", background=CARD, fieldbackground=CARD,
+                        foreground=FG, bordercolor=GRAY_DARK, rowheight=24)
+        style.map("Treeview",
+                  background=[("selected", GREEN_DARK)],
+                  foreground=[("selected", "#ffffff")])
+        style.configure("Treeview.Heading", background=TERTIARY, foreground=FG,
+                        font=self._font_bold, relief="flat")
+        style.map("Treeview.Heading", background=[("active", GRAY_DARK)])
+
+        # Scrollbar / progress / separator
+        style.configure("Vertical.TScrollbar", background=TERTIARY,
+                        troughcolor=BG, bordercolor=BG, arrowcolor=FG)
+        style.configure("Horizontal.TProgressbar", background=GREEN, troughcolor=CARD, bordercolor=BG)
+        style.configure("TSeparator", background=GRAY_DARK)
+
+        # Notebook (Archives / Library tabs)
+        style.configure("TNotebook", background=BG, bordercolor=GRAY_DARK, tabmargins=(2, 4, 2, 0))
+        style.configure("TNotebook.Tab", background=CARD, foreground=GRAY_LIGHT,
+                        padding=(16, 7), font=self._font)
+        style.map("TNotebook.Tab",
+                  background=[("selected", TERTIARY)],
+                  foreground=[("selected", GREEN_LIGHT)],
+                  expand=[("selected", (1, 1, 1, 0))])
 
     def _set_app_icon(self):
         """Set the window icon to a generated 3D-cube graphic (best-effort)."""
@@ -388,17 +513,19 @@ class App(tk.Tk):
         ).pack(side="left", padx=(0, 12))
 
         self._load_btn = ttk.Button(
-            top_btn_frame, text="⟳  Load models", command=self._start_load
+            top_btn_frame, text="⟳  Load models", command=self._start_load, style="Accent.TButton"
         )
         self._load_btn.pack(side="left", padx=(0, 6))
 
         self._run_btn = ttk.Button(
-            top_btn_frame, text="▶  Run sync", command=self._start_sync, state="disabled"
+            top_btn_frame, text="▶  Run sync", command=self._start_sync,
+            state="disabled", style="Accent.TButton"
         )
         self._run_btn.pack(side="left", padx=(0, 6))
 
         self._stop_btn = ttk.Button(
-            top_btn_frame, text="⬛  Stop", command=self._request_stop, state="disabled"
+            top_btn_frame, text="⬛  Stop", command=self._request_stop,
+            state="disabled", style="Danger.TButton"
         )
         self._stop_btn.pack(side="left")
 
@@ -416,11 +543,11 @@ class App(tk.Tk):
 
         # ── Model selection pane ──────────────────────────────────────────────
         sel_outer = ttk.LabelFrame(paned, text="Model selection  —  click a row to toggle (or a column header to sort)")
-        paned.add(sel_outer, weight=2)
+        paned.add(sel_outer, weight=3)
 
-        # Sort + filter controls (apply to both lists)
+        # Sort + filter controls (apply to both tabs)
         view_bar = ttk.Frame(sel_outer)
-        view_bar.pack(fill="x", padx=4, pady=(4, 0))
+        view_bar.pack(fill="x", padx=6, pady=(6, 2))
         ttk.Label(view_bar, text="Sort by:").pack(side="left")
         self._sort_var = tk.StringVar(value="Name")
         sort_combo = ttk.Combobox(
@@ -442,48 +569,45 @@ class App(tk.Tk):
             command=self._apply_view,
         ).pack(side="left")
 
-        # Archives sub-section
-        arch_hdr = ttk.Frame(sel_outer)
-        arch_hdr.pack(fill="x", padx=4, pady=(4, 0))
-        self._arch_label = ttk.Label(arch_hdr, text="Archives  (load models first)")
-        self._arch_label.pack(side="left")
-        ttk.Button(arch_hdr, text="All",  width=4,
-                   command=lambda: self._arch_tree.set_all(True)).pack(side="right", padx=(2, 0))
-        ttk.Button(arch_hdr, text="None", width=4,
-                   command=lambda: self._arch_tree.set_all(False)).pack(side="right")
+        # Tabs: Archives | Library files — each gets the full pane height
+        self._notebook = ttk.Notebook(sel_outer)
+        self._notebook.pack(fill="both", expand=True, padx=4, pady=(0, 4))
 
-        self._arch_tree = CheckTree(sel_outer)
+        def _make_tab(all_cmd, none_cmd) -> tuple[ttk.Frame, "CheckTree"]:
+            tab = ttk.Frame(self._notebook)
+            hdr = ttk.Frame(tab)
+            hdr.pack(fill="x", padx=2, pady=(4, 2))
+            ttk.Button(hdr, text="Select all",  command=all_cmd).pack(side="right", padx=(4, 0))
+            ttk.Button(hdr, text="Select none", command=none_cmd).pack(side="right")
+            ttk.Label(hdr, text="Click a row to toggle ·  click a header to sort",
+                      style="Muted.TLabel").pack(side="left")
+            tree = CheckTree(tab)
+            return tab, tree
 
-        ttk.Separator(sel_outer, orient="horizontal").pack(fill="x", padx=4, pady=4)
-
-        # Library files sub-section
-        lib_hdr = ttk.Frame(sel_outer)
-        lib_hdr.pack(fill="x", padx=4, pady=(0, 0))
-        self._lib_label = ttk.Label(lib_hdr, text="Library files  (load models first)")
-        self._lib_label.pack(side="left")
-        ttk.Button(lib_hdr, text="All",  width=4,
-                   command=lambda: self._lib_tree.set_all(True)).pack(side="right", padx=(2, 0))
-        ttk.Button(lib_hdr, text="None", width=4,
-                   command=lambda: self._lib_tree.set_all(False)).pack(side="right")
-
-        self._lib_tree = CheckTree(sel_outer)
+        arch_tab, self._arch_tree = _make_tab(
+            lambda: self._arch_tree.set_all(True), lambda: self._arch_tree.set_all(False))
+        lib_tab, self._lib_tree = _make_tab(
+            lambda: self._lib_tree.set_all(True), lambda: self._lib_tree.set_all(False))
+        self._notebook.add(arch_tab, text="Archives")
+        self._notebook.add(lib_tab,  text="Library files")
+        self._arch_tab, self._lib_tab = arch_tab, lib_tab
 
         # ── Log pane ──────────────────────────────────────────────────────────
         log_frame = ttk.LabelFrame(paned, text="Output")
-        paned.add(log_frame, weight=1)
+        paned.add(log_frame, weight=2)
 
-        mono = font.Font(family="Courier", size=10)
+        mono = font.Font(family="Menlo", size=10)
         self._log = scrolledtext.ScrolledText(
             log_frame, state="disabled", wrap="word",
-            font=mono, background="#1e1e1e", foreground="#d4d4d4",
-            insertbackground="white",
+            font=mono, background=BG, foreground=FG,
+            insertbackground=FG, borderwidth=0, highlightthickness=0,
         )
         self._log.pack(fill="both", expand=True, padx=4, pady=4)
 
-        self._log.tag_config("ok",   foreground="#4ec9b0")
-        self._log.tag_config("warn", foreground="#ce9178")
-        self._log.tag_config("err",  foreground="#f44747")
-        self._log.tag_config("info", foreground="#9cdcfe")
+        self._log.tag_config("ok",   foreground=GREEN_LIGHT)
+        self._log.tag_config("warn", foreground="#e0a800")
+        self._log.tag_config("err",  foreground=DANGER)
+        self._log.tag_config("info", foreground=GRAY_LIGHT)
 
     # ── Field helpers ─────────────────────────────────────────────────────────
 
@@ -673,10 +797,9 @@ class App(tk.Tk):
             date    = a.get("created_at") or a.get("created") or ""
             self._arch_tree.add_row(str(aid), stem, status, checked, date=date)
 
-        self._arch_label.configure(
-            text=f"Archives  ({len(archives)} total, "
-                 f"{sum(1 for a in archives if a.get('id') in synced_archive_ids)} already synced)"
-        )
+        arch_synced = sum(1 for a in archives if a.get("id") in synced_archive_ids)
+        self._notebook.tab(self._arch_tab,
+                           text=f"Archives  ({len(archives)} · {arch_synced} synced)")
 
         # Populate library files tree (supported extensions only)
         supported_extensions = {".3mf", ".stl", ".obj", ".step", ".stp"}
@@ -694,10 +817,9 @@ class App(tk.Tk):
             date    = lf.get("created_at") or lf.get("created") or ""
             self._lib_tree.add_row(str(fid), display, status, checked, date=date)
 
-        self._lib_label.configure(
-            text=f"Library files  ({len(supported)} supported, "
-                 f"{sum(1 for lf in supported if lf.get('id') in synced_file_ids)} already synced)"
-        )
+        lib_synced = sum(1 for lf in supported if lf.get("id") in synced_file_ids)
+        self._notebook.tab(self._lib_tab,
+                           text=f"Library files  ({len(supported)} · {lib_synced} synced)")
 
         # Apply the current sort/filter and render both trees.
         self._apply_view()

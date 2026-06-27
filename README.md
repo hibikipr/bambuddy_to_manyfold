@@ -27,12 +27,32 @@ v0 API (model/file Tus uploads, collections, creators) and Bambuddy's MakerWorld
 
 ## Requirements
 
+**Python 3.10 or newer** is required (the code uses `X | None` type hints, which
+older versions reject at import time). Both scripts check this on startup and
+exit with a clear message if run on an older interpreter.
+
 ```bash
 pip install requests tqdm
 ```
 
 `tkinter` is needed for the GUI. It ships with Python on macOS and Windows; on
 Linux install it separately, e.g. `sudo apt install python3-tk`.
+
+### macOS: watch out for the wrong `python3`
+
+macOS bundles an old Python at `/usr/bin/python3` (currently **3.9**), which is
+**too old** — running the scripts with it fails. Install a current build from
+[python.org](https://www.python.org/downloads/) (or Homebrew) and invoke it
+explicitly to be safe:
+
+```bash
+python3.14 bambuddy_to_manyfold_gui.py      # GUI
+python3.14 bambuddy_to_manyfold.py --dry-run # CLI
+```
+
+Check what your `python3` resolves to with `python3 --version`. The included
+[`run_sync.sh`](run_sync.sh) auto-selects a Python 3.10+ interpreter for you and
+prints which one it used.
 
 ---
 
@@ -135,12 +155,14 @@ Workflow:
    **Show** toggle). Settings persist to `~/.bambuddy_to_manyfold_gui.json`.
 2. Click **⟳ Load models** to fetch archives and library files from Bambuddy.
    Items already in the sync state show greyed out and pre-unchecked.
-3. In the two lists, tick the models you want. Each section has **All** / **None**
-   buttons, and you can click any row to toggle it. Sort with the **Sort by**
-   (Name / Date / Status) control or by clicking a column header, toggle
-   **Descending**, and tick **Hide already-synced** to focus on new items.
-4. Click **▶ Run sync**. When it finishes, the lists reload automatically so
-   statuses update (newly-synced items show as `synced`).
+3. Pick models in the **Archives** and **Library files** tabs (each tab shows its
+   item / synced counts). Tick the ones you want — **Select all** / **Select none**
+   per tab, or click any row to toggle it. The shared **Sort by** (Name / Date /
+   Status) control + **Descending** and **Hide already-synced** apply to both
+   tabs; you can also click a column header to sort.
+4. Click **▶ Run sync** — the **Output** pane below stays visible so you can watch
+   progress. When it finishes, the lists reload automatically so statuses update
+   (newly-synced items show as `synced`).
 
 ### Options
 

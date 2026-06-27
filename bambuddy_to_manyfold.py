@@ -16,12 +16,25 @@ Manyfold API docs:   http://<your-manyfold>/api
 🤖 Built with Claude Code (https://claude.com/claude-code)
 """
 
+import sys
+
+# This script uses ``X | None`` type-hint syntax (PEP 604), which Python
+# evaluates at import time and only supports on 3.10+. On older interpreters
+# (notably macOS's bundled /usr/bin/python3, which is 3.9) the import would
+# otherwise fail with a cryptic "unsupported operand type(s) for |" TypeError.
+if sys.version_info < (3, 10):
+    sys.exit(
+        f"❌ Python 3.10+ required, but this is {sys.version.split()[0]} "
+        f"({sys.executable}).\n"
+        f"   macOS's /usr/bin/python3 is too old — use the python.org build, e.g.:\n"
+        f"   python3.14 {' '.join(sys.argv) or 'bambuddy_to_manyfold.py'}"
+    )
+
 import argparse
 import hashlib
 import json
 import os
 import re
-import sys
 import tempfile
 import time
 from html.parser import HTMLParser
