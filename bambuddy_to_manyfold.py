@@ -173,6 +173,38 @@ def get_bambuddy_library_files(session: requests.Session) -> list:
     return data
 
 
+def get_bambuddy_makerworld_urls(session: requests.Session) -> dict[int, str]:
+    """Return {library_file_id → MakerWorld source URL} for imported files.
+
+    The MakerWorld import stores the source URL on the LibraryFile row, but it's
+    NOT exposed by the general /library/files endpoints — only by the dedicated
+    /makerworld/recent-imports endpoint, which is capped at 50 rows. Files beyond
+    that cap simply won't get a link (logged, non-fatal).
+    """
+    mapping: dict[int, str] = {}
+    try:
+        resp = session.get(
+            f"{BAMBUDDY_URL}/api/v1/makerworld/recent-imports",
+            params={"limit": 50},
+            headers=bambuddy_headers(),
+            timeout=30,
+        )
+        if not resp.ok:
+            dprint(f"    ⚠️  Could not fetch MakerWorld imports: {resp.status_code}")
+            return mapping
+        for row in resp.json():
+            fid = row.get("library_file_id")
+            url = row.get("source_url")
+            if fid is not None and url:
+                mapping[int(fid)] = url
+    except Exception as e:
+        dprint(f"    ⚠️  Could not fetch MakerWorld imports: {e}")
+    if mapping:
+        print(f"    {len(mapping)} MakerWorld source link(s) found (max 50)")
+        dprint(f"    MakerWorld-linked file IDs: {sorted(mapping)}")
+    return mapping
+
+
 def download_bambuddy_archive(session: requests.Session, archive_id: int, dest: Path):
     """Stream-download a Bambuddy archive 3MF to a local file."""
     resp = session.get(
@@ -363,18 +395,72 @@ def tus_upload_file(session: requests.Session, file_path: Path) -> str | None:
     return upload_url
 
 
+def _get_all_manyfold_model_ids(session: requests.Session) -> set[str]:
+    """Return the set of all model slugs/IDs currently in Manyfold."""
+    ids: set[str] = set()
+    page = 1
+    while True:
+        try:
+            resp = session.get(
+                f"{MANYFOLD_URL}/models",
+                params={"page": page},
+                headers=manyfold_headers(),
+                timeout=15,
+            )
+            if not resp.ok:
+                break
+            data = resp.json()
+            members = data.get("member", [])
+            for m in members:
+                at_id = m.get("@id", "")
+                if at_id:
+                    ids.add(at_id.rstrip("/").split("/")[-1])
+            total = data.get("totalItems", 0)
+            if not members or len(ids) >= total:
+                break
+            page += 1
+        except Exception:
+            break
+    return ids
+
+
+def add_manyfold_model_link(session: requests.Session, model_id: str, url: str, text: str) -> bool:
+    """PATCH a link onto an existing Manyfold model (ModelDeserializer supports links)."""
+    resp = session.patch(
+        f"{MANYFOLD_URL}/models/{model_id}",
+        json={"links": [{"url": url, "text": text}]},
+        headers={**manyfold_headers(), "Content-Type": "application/vnd.manyfold.v0+json"},
+        timeout=30,
+    )
+    if resp.ok:
+        return True
+    print(f"    ⚠️  Failed to add link to model {model_id}: {resp.status_code} {resp.text[:200]}")
+    return False
+
+
 def create_manyfold_model_from_upload(
     session: requests.Session,
     name: str,
     upload_url: str,
     filename: str,
     collection_at_id: str | None = None,
+    source_url: str | None = None,
+    source_text: str = "Source",
 ) -> bool:
     """Create a model in Manyfold from a previously-uploaded Tus file.
 
     Manyfold creates models *from* uploaded files (async) — there is no
     "empty model" concept in the API. Returns True on 202 Accepted.
+
+    If ``source_url`` is given, the model is located after the async creation
+    job runs and the URL is PATCHed on as a link (the upload endpoint can't
+    accept links directly). Link attachment is best-effort: a failure to find
+    the model in time logs a warning but doesn't fail the sync.
     """
+    # Snapshot existing model IDs first so we can detect the newly-created one
+    # by diff after the async job runs (only needed when attaching a link).
+    existing_ids = _get_all_manyfold_model_ids(session) if source_url else set()
+
     # Always send isPartOf — an EMPTY array when there's no collection.
     # Manyfold's ProcessUploadedFileJob crashes with "undefined method 'map'
     # for nil" if the collections key ends up nil, which happens when isPartOf
@@ -393,10 +479,35 @@ def create_manyfold_model_from_upload(
         headers={**manyfold_headers(), "Content-Type": "application/vnd.manyfold.v0+json"},
         timeout=60,
     )
-    if resp.status_code == 202:
-        return True
-    print(f"    ⚠️  Model create failed for '{name}': {resp.status_code} {resp.text[:300]}")
-    return False
+    if resp.status_code != 202:
+        print(f"    ⚠️  Model create failed for '{name}': {resp.status_code} {resp.text[:300]}")
+        return False
+
+    if source_url:
+        model_id = _poll_for_new_manyfold_model(session, existing_ids)
+        if model_id:
+            if add_manyfold_model_link(session, model_id, source_url, source_text):
+                dprint(f"    🔗 Linked {source_text}: {source_url}")
+        else:
+            print(f"    ⚠️  Created '{name}' but couldn't locate it to attach the source link.")
+
+    return True
+
+
+def _poll_for_new_manyfold_model(
+    session: requests.Session,
+    existing_ids: set[str],
+    attempts: int = 8,
+    delay: float = 2.0,
+) -> str | None:
+    """Poll until a model ID appears that wasn't in existing_ids (the async-created one)."""
+    import time
+    for _ in range(attempts):
+        time.sleep(delay)
+        new_ids = _get_all_manyfold_model_ids(session) - existing_ids
+        if new_ids:
+            return next(iter(new_ids))
+    return None
 
 
 
@@ -452,21 +563,26 @@ def upload_model_to_manyfold(
     file_path: Path,
     collection_at_id: str | None,
     dry_run: bool,
+    source_url: str | None = None,
+    source_text: str = "Source",
 ) -> bool:
     """Tus-upload a file and create a model from it in Manyfold.
 
     Wraps the two-step Manyfold flow (tus upload → POST /models) so the
-    sync loops have a single call site. Honours dry_run.
+    sync loops have a single call site. Honours dry_run. When ``source_url``
+    is given it's attached to the created model as a link (best-effort).
     """
     if dry_run:
-        print(f"    [dry-run] Would upload {file_path.name} and create model '{model_name}'")
+        link_note = f" with {source_text} link" if source_url else ""
+        print(f"    [dry-run] Would upload {file_path.name} and create model '{model_name}'{link_note}")
         return True
 
     upload_url = tus_upload_file(session, file_path)
     if not upload_url:
         return False
     return create_manyfold_model_from_upload(
-        session, model_name, upload_url, file_path.name, collection_at_id
+        session, model_name, upload_url, file_path.name, collection_at_id,
+        source_url=source_url, source_text=source_text,
     )
 
 
@@ -541,6 +657,7 @@ def sync_library_files(
     selected_ids: set | None = None,
     create_missing: bool = True,
     force: bool = False,
+    add_source_links: bool = True,
 ) -> int:
     if selected_ids is not None and len(selected_ids) == 0:
         print("\n📁 No library files selected — skipping.")
@@ -548,6 +665,8 @@ def sync_library_files(
     lib_files = get_bambuddy_library_files(session)
     if selected_ids is not None:
         lib_files = [f for f in lib_files if f.get("id") in selected_ids]
+    # Map of library_file_id → MakerWorld source URL (for attaching links).
+    makerworld_urls = get_bambuddy_makerworld_urls(session) if add_source_links else {}
     flat_folders = _flatten_folders(get_bambuddy_library_folders(session))
     # Map bambuddy folder_id → folder dict (with _full_path)
     folder_by_id: dict[int, dict] = {f["id"]: f for f in flat_folders}
@@ -634,8 +753,16 @@ def sync_library_files(
                 continue
 
             collection_at_id = _ensure_collection(folder_id)
+            source_url = makerworld_urls.get(file_id)
+            if source_url:
+                tqdm.write(f"  🔗 MakerWorld source: {source_url}")
+            elif add_source_links:
+                dprint(f"    (no MakerWorld link for file id {file_id} — not in recent-imports window)")
             tqdm.write(f"  ↑  Uploading to Manyfold: {label}")
-            ok = upload_model_to_manyfold(session, model_name, dest, collection_at_id, dry_run)
+            ok = upload_model_to_manyfold(
+                session, model_name, dest, collection_at_id, dry_run,
+                source_url=source_url, source_text="MakerWorld",
+            )
 
         if ok:
             synced_ids.add(file_id)
@@ -763,6 +890,11 @@ def main():
         action="store_true",
         help="Ignore the local sync-state file and re-process items (recovers failed uploads).",
     )
+    parser.add_argument(
+        "--no-links",
+        action="store_true",
+        help="Do not attach MakerWorld source URLs as links on synced models.",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
@@ -792,7 +924,7 @@ def main():
     start = time.time()
     create_missing = not args.no_create
     archives_added = sync_archives(session, state, existing_names, args.dry_run, create_missing=create_missing, force=args.force)
-    library_added = sync_library_files(session, state, existing_names, args.dry_run, create_missing=create_missing, force=args.force)
+    library_added = sync_library_files(session, state, existing_names, args.dry_run, create_missing=create_missing, force=args.force, add_source_links=not args.no_links)
 
     if not args.dry_run:
         save_sync_state(state)

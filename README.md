@@ -85,6 +85,9 @@ python3 bambuddy_to_manyfold.py --no-create
 # Ignore the local sync-state file and re-process items
 # (recovers uploads whose background job failed)
 python3 bambuddy_to_manyfold.py --force
+
+# Don't attach MakerWorld source URLs as links on synced models
+python3 bambuddy_to_manyfold.py --no-links
 ```
 
 ### Flags
@@ -94,6 +97,7 @@ python3 bambuddy_to_manyfold.py --force
 | `--dry-run` | Logs what would be synced. No uploads, no state-file writes. |
 | `--no-create` | Skips any model not already present in Manyfold. |
 | `--force` | Ignores the local sync-state file so already-recorded items are re-processed. The live "already in Manyfold" check still applies, so this won't create duplicates of models that genuinely synced. |
+| `--no-links` | Skips attaching MakerWorld source URLs as links on synced models. |
 
 A convenience wrapper, [`run_sync.sh`](run_sync.sh), exports the env vars and
 runs the script. Edit it with your values, then `./run_sync.sh [--dry-run]`.
@@ -123,6 +127,8 @@ Workflow:
   that already exist (equivalent to `--no-create`).
 - **Force re-sync (ignore sync state)** — re-process selected items even if the
   state file lists them as synced (equivalent to `--force`).
+- **Add MakerWorld links** — attach the MakerWorld source URL (for library files
+  imported from MakerWorld) as a clickable link on the created Manyfold model.
 - **Log debug** — show verbose diagnostics (pagination, scope probe, etc.).
 
 Output streams live into the log pane, colour-coded, with a timestamped marker
@@ -143,6 +149,12 @@ at the start of each load/sync.
   create the model asynchronously (returns `202 Accepted`).
 - **State** is tracked in the sync-state JSON: synced archive IDs, synced library
   file IDs, and a Bambuddy-folder → Manyfold-collection mapping.
+- **MakerWorld links** — files imported into Bambuddy via "Import from MakerWorld"
+  carry a source URL. The sync fetches these from `GET /makerworld/recent-imports`
+  and, after a model is created, PATCHes the URL on as a Manyfold link. Because
+  that endpoint is capped at 50 rows, only the 50 most recent MakerWorld imports
+  get links; the upload endpoint itself can't accept links, so this is done as a
+  best-effort follow-up (a file still syncs if the link step can't find it).
 
 ---
 

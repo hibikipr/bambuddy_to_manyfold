@@ -13,15 +13,71 @@ Usage:
 🤖 Built with Claude Code (https://claude.com/claude-code)
 """
 
+import base64
 import io
 import json
 import os
 import queue
+import struct
 import sys
 import threading
 import tkinter as tk
+import zlib
 from pathlib import Path
 from tkinter import filedialog, font, messagebox, scrolledtext, ttk
+
+
+# ── App icon ──────────────────────────────────────────────────────────────────
+
+def _png_chunk(typ: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + typ + data + struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF)
+
+
+def _make_icon_png(size: int = 64) -> bytes:
+    """Render an isometric 3D cube (a "model") as RGBA PNG bytes — pure stdlib.
+
+    The cube nods at what the app does: pushing 3D models from Bambuddy to
+    Manyfold. Three shaded faces give a clean depth read at small sizes.
+    """
+    s = size
+    px = bytearray(s * s * 4)  # transparent RGBA
+
+    # Cube faces as parallelograms (origin + two edge vectors), scaled to `size`.
+    f = s / 64.0
+    T = (32 * f, 8 * f)
+    L = (8 * f, 22 * f)
+    R = (56 * f, 22 * f)
+    B = (32 * f, 36 * f)
+    side = 24 * f  # vertical drop of the side faces
+
+    faces = [
+        # (origin, u, v, colour)  — top (lightest), left (mid), right (darkest)
+        (T, (L[0] - T[0], L[1] - T[1]), (R[0] - T[0], R[1] - T[1]), (108, 182, 255)),
+        (L, (0, side), (B[0] - L[0], B[1] - L[1]), (58, 120, 194)),
+        (R, (0, side), (B[0] - R[0], B[1] - R[1]), (43, 90, 147)),
+    ]
+
+    for y in range(s):
+        for x in range(s):
+            cx, cy = x + 0.5, y + 0.5
+            for (ox, oy), (ux, uy), (vx, vy), (cr, cg, cb) in faces:
+                det = ux * vy - uy * vx
+                if det == 0:
+                    continue
+                a = ((cx - ox) * vy - (cy - oy) * vx) / det
+                b = (ux * (cy - oy) - uy * (cx - ox)) / det
+                if -0.02 <= a <= 1.02 and -0.02 <= b <= 1.02:
+                    i = (y * s + x) * 4
+                    px[i], px[i + 1], px[i + 2], px[i + 3] = cr, cg, cb, 255
+                    break
+
+    raw = bytearray()
+    for y in range(s):
+        raw.append(0)  # filter type 0 per scanline
+        raw.extend(px[y * s * 4:(y + 1) * s * 4])
+    idat = zlib.compress(bytes(raw), 9)
+    ihdr = struct.pack(">IIBBBBB", s, s, 8, 6, 0, 0, 0)  # 8-bit RGBA
+    return b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", idat) + _png_chunk(b"IEND", b"")
 
 # ── Config persistence ────────────────────────────────────────────────────────
 
@@ -162,6 +218,7 @@ class App(tk.Tk):
         self.title("Bambuddy → Manyfold Sync")
         self.resizable(True, True)
         self.minsize(720, 640)
+        self._set_app_icon()
 
         self._cfg = load_gui_config()
         self._log_queue: "queue.Queue[str]" = queue.Queue()
@@ -174,6 +231,16 @@ class App(tk.Tk):
         self._build_ui()
         self._load_fields()
         self._poll_log()
+
+    def _set_app_icon(self):
+        """Set the window icon to a generated 3D-cube graphic (best-effort)."""
+        try:
+            png = _make_icon_png(64)
+            # Keep a reference on the instance so Tk doesn't garbage-collect it.
+            self._icon_img = tk.PhotoImage(data=base64.b64encode(png).decode("ascii"))
+            self.iconphoto(True, self._icon_img)
+        except Exception:
+            pass  # Older Tk without PNG support, etc. — non-fatal.
 
     # ── UI construction ───────────────────────────────────────────────────────
 
@@ -242,6 +309,11 @@ class App(tk.Tk):
         self._force_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             top_btn_frame, text="Force re-sync (ignore sync state)", variable=self._force_var
+        ).pack(side="left", padx=(0, 12))
+
+        self._links_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            top_btn_frame, text="Add MakerWorld links", variable=self._links_var
         ).pack(side="left", padx=(0, 12))
 
         self._debug_var = tk.BooleanVar(value=False)
@@ -559,6 +631,7 @@ class App(tk.Tk):
         dry_run = self._dry_run_var.get()
         create_missing = self._create_missing_var.get()
         force = self._force_var.get()
+        add_links = self._links_var.get()
         self._running = True
         self._load_btn.configure(state="disabled")
         self._run_btn.configure(state="disabled")
@@ -567,7 +640,7 @@ class App(tk.Tk):
 
         threading.Thread(
             target=self._sync_worker,
-            args=(cfg, dry_run, create_missing, force, selected_archive_ids, selected_file_ids),
+            args=(cfg, dry_run, create_missing, force, add_links, selected_archive_ids, selected_file_ids),
             daemon=True,
         ).start()
 
@@ -588,6 +661,7 @@ class App(tk.Tk):
         dry_run: bool,
         create_missing: bool,
         force: bool,
+        add_links: bool,
         selected_archive_ids: set[int],
         selected_file_ids: set[int],
     ):
@@ -634,6 +708,7 @@ class App(tk.Tk):
                     selected_ids=selected_file_ids,
                     create_missing=create_missing,
                     force=force,
+                    add_source_links=add_links,
                 )
 
                 if not dry_run:
