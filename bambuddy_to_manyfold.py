@@ -18,13 +18,13 @@ Manyfold API docs:   http://<your-manyfold>/api
 
 import argparse
 import hashlib
-import html
 import json
 import os
 import re
 import sys
 import tempfile
 import time
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -255,17 +255,85 @@ def download_makerworld_image(session: requests.Session, image_url: str, dest: P
         return False
 
 
-def _html_to_text(value: str | None) -> str | None:
-    """Convert MakerWorld's HTML summary into plain text for the Manyfold notes.
+class _HTMLToMarkdown(HTMLParser):
+    """Minimal HTML→Markdown converter for MakerWorld design summaries.
 
-    Keeps paragraph/line breaks, drops all other tags, unescapes entities.
+    Manyfold renders model notes as Markdown, so converting (rather than
+    flattening to plain text) preserves headings, emphasis, lists, links and
+    images. Handles the common tags MakerWorld emits; unknown tags pass their
+    text through.
     """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out: list[str] = []
+        self._href: str | None = None
+        self._list_stack: list[list] = []  # entries: ["ul"|"ol", counter]
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag in ("script", "style"):
+            self._skip += 1
+        elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            self.out.append("\n\n" + "#" * int(tag[1]) + " ")
+        elif tag in ("strong", "b"):
+            self.out.append("**")
+        elif tag in ("em", "i"):
+            self.out.append("*")
+        elif tag == "br":
+            self.out.append("  \n")
+        elif tag == "p":
+            self.out.append("\n\n")
+        elif tag == "a":
+            self._href = a.get("href")
+            self.out.append("[")
+        elif tag == "img":
+            src, alt = a.get("src", ""), a.get("alt", "")
+            if src:
+                self.out.append(f"![{alt}]({src})")
+        elif tag in ("ul", "ol"):
+            self._list_stack.append([tag, 0])
+            self.out.append("\n")
+        elif tag == "li":
+            indent = "  " * max(0, len(self._list_stack) - 1)
+            if self._list_stack and self._list_stack[-1][0] == "ol":
+                self._list_stack[-1][1] += 1
+                self.out.append(f"\n{indent}{self._list_stack[-1][1]}. ")
+            else:
+                self.out.append(f"\n{indent}- ")
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style"):
+            self._skip = max(0, self._skip - 1)
+        elif tag in ("strong", "b"):
+            self.out.append("**")
+        elif tag in ("em", "i"):
+            self.out.append("*")
+        elif tag in ("h1", "h2", "h3", "h4", "h5", "h6", "p"):
+            self.out.append("\n")
+        elif tag == "a":
+            href = self._href or ""
+            self.out.append(f"]({href})" if href else "]")
+            self._href = None
+        elif tag in ("ul", "ol"):
+            if self._list_stack:
+                self._list_stack.pop()
+            self.out.append("\n")
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.out.append(data)
+
+
+def _html_to_markdown(value: str | None) -> str | None:
+    """Convert MakerWorld's HTML summary into Markdown for the Manyfold notes."""
     if not value:
         return None
-    text = re.sub(r"(?i)</p\s*>", "\n\n", value)
-    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
-    text = re.sub(r"<[^>]+>", "", text)        # strip remaining tags
-    text = html.unescape(text)
+    parser = _HTMLToMarkdown()
+    parser.feed(value)
+    text = "".join(parser.out)
+    text = re.sub(r"[ \t]+\n", "\n", text)     # trailing whitespace before newlines
     text = re.sub(r"\n{3,}", "\n\n", text)     # collapse excess blank lines
     return text.strip() or None
 
@@ -512,11 +580,40 @@ def _get_all_manyfold_model_ids(session: requests.Session) -> set[str]:
     return ids
 
 
-def add_manyfold_model_link(session: requests.Session, model_id: str, url: str, text: str) -> bool:
-    """PATCH a link onto an existing Manyfold model (ModelDeserializer supports links)."""
+def _manyfold_model_link_urls(session: requests.Session, model_id: str) -> set[str]:
+    """Return the set of URLs already linked on a Manyfold model."""
+    try:
+        resp = session.get(
+            f"{MANYFOLD_URL}/models/{model_id}",
+            headers=manyfold_headers(),
+            timeout=20,
+        )
+        if resp.ok:
+            return {l.get("url", "") for l in resp.json().get("links", []) if l.get("url")}
+    except Exception:
+        pass
+    return set()
+
+
+def add_manyfold_model_link(session: requests.Session, model_id: str, url: str, text: str | None = None) -> bool:
+    """PATCH a link onto a Manyfold model, idempotently.
+
+    PATCHing ``links`` appends (it doesn't replace), so without this guard a
+    re-sync would pile up duplicate links. Skip if the URL is already linked.
+
+    By default no link ``text`` is sent — Manyfold then renders the link using
+    its own site-derived label (e.g. "MakerWorld"). Passing a custom text just
+    ends up sitting next to that label and reads as a doubled "...MakerWorld".
+    """
+    if url in _manyfold_model_link_urls(session, model_id):
+        dprint(f"    🔗 Link already present, skipping: {url}")
+        return True
+    link: dict = {"url": url}
+    if text:
+        link["text"] = text
     resp = session.patch(
         f"{MANYFOLD_URL}/models/{model_id}",
-        json={"links": [{"url": url, "text": text}]},
+        json={"links": [link]},
         headers={**manyfold_headers(), "Content-Type": "application/vnd.manyfold.v0+json"},
         timeout=30,
     )
@@ -529,15 +626,28 @@ def add_manyfold_model_link(session: requests.Session, model_id: str, url: str, 
 def patch_manyfold_model_metadata(
     session: requests.Session,
     model_id: str,
+    name: str | None = None,
     description: str | None = None,
     tag_list: list[str] | None = None,
+    creator_at_id: str | None = None,
+    preview_file_at_id: str | None = None,
 ) -> bool:
-    """PATCH description (notes) and/or tags onto an existing Manyfold model."""
+    """PATCH metadata fields onto an existing Manyfold model.
+
+    Any combination of name, description (notes), tags (keywords), creator and
+    preview_file. No-op (returns True) if nothing to set.
+    """
     payload: dict = {}
+    if name:
+        payload["name"] = name
     if description:
         payload["description"] = description
     if tag_list:
         payload["keywords"] = tag_list
+    if creator_at_id:
+        payload["creator"] = {"@id": creator_at_id}
+    if preview_file_at_id:
+        payload["preview_file"] = {"@id": preview_file_at_id}
     if not payload:
         return True
     resp = session.patch(
@@ -550,6 +660,74 @@ def patch_manyfold_model_metadata(
         return True
     print(f"    ⚠️  Failed to set metadata on model {model_id}: {resp.status_code} {resp.text[:200]}")
     return False
+
+
+# Lazily-populated {creator_name_lower → creator @id URL}. Reset each run because
+# the GUI reloads the module; the CLI is a single run.
+_MANYFOLD_CREATORS: dict[str, str] | None = None
+
+
+def ensure_manyfold_creator(session: requests.Session, name: str) -> str | None:
+    """Find a Manyfold creator by name (case-insensitive), creating it if absent.
+
+    Returns the creator's @id URL, or None on failure.
+    """
+    global _MANYFOLD_CREATORS
+    key = name.strip().lower()
+    if not key:
+        return None
+
+    if _MANYFOLD_CREATORS is None:
+        _MANYFOLD_CREATORS = {}
+        page = 1
+        while True:
+            try:
+                resp = session.get(
+                    f"{MANYFOLD_URL}/creators",
+                    params={"page": page},
+                    headers=manyfold_headers(),
+                    timeout=20,
+                )
+                if not resp.ok:
+                    break
+                data = resp.json()
+                members = data.get("member", [])
+                for c in members:
+                    cname = c.get("name", "")
+                    at_id = c.get("@id", "")
+                    if cname and at_id:
+                        _MANYFOLD_CREATORS[cname.strip().lower()] = at_id
+                total = data.get("totalItems", 0)
+                if not members or len(_MANYFOLD_CREATORS) >= total:
+                    break
+                page += 1
+            except Exception:
+                break
+
+    if key in _MANYFOLD_CREATORS:
+        return _MANYFOLD_CREATORS[key]
+
+    # Create it (synchronous — returns 201 with the serialized creator @id).
+    try:
+        resp = session.post(
+            f"{MANYFOLD_URL}/creators",
+            json={"name": name},
+            headers={**manyfold_headers(), "Content-Type": "application/vnd.manyfold.v0+json"},
+            timeout=20,
+        )
+        if resp.status_code in (200, 201):
+            at_id = (resp.json() or {}).get("@id")
+            if not at_id:
+                loc = resp.headers.get("Location", "")
+                at_id = f"{MANYFOLD_URL}{loc}" if loc.startswith("/") else loc or None
+            if at_id:
+                _MANYFOLD_CREATORS[key] = at_id
+                return at_id
+        else:
+            dprint(f"    ⚠️  Failed to create creator '{name}': {resp.status_code} {resp.text[:150]}")
+    except Exception as e:
+        dprint(f"    ⚠️  Creator create error for '{name}': {e}")
+    return None
 
 
 def add_image_to_manyfold_model(session: requests.Session, model_id: str, image_path: Path) -> bool:
@@ -569,41 +747,94 @@ def add_image_to_manyfold_model(session: requests.Session, model_id: str, image_
     return False
 
 
+def find_manyfold_model_image_file(
+    session: requests.Session,
+    model_id: str,
+    attempts: int = 8,
+    delay: float = 2.0,
+) -> str | None:
+    """Poll GET /models/{id} until an image file appears in hasPart; return its @id.
+
+    Used to set the cover as the model's preview_file after the async
+    model_files job has processed the uploaded image.
+    """
+    import time
+    for _ in range(attempts):
+        time.sleep(delay)
+        try:
+            resp = session.get(
+                f"{MANYFOLD_URL}/models/{model_id}",
+                headers=manyfold_headers(),
+                timeout=20,
+            )
+            if not resp.ok:
+                continue
+            for part in resp.json().get("hasPart", []):
+                fmt = (part.get("encodingFormat") or "").lower()
+                if fmt.startswith("image/") and part.get("@id"):
+                    return part["@id"]
+        except Exception:
+            pass
+    return None
+
+
 def enrich_manyfold_model_from_makerworld(
     session: requests.Session,
     model_id: str,
     model_name: str,
     source_url: str,
+    design: dict | None = None,
 ) -> None:
     """Fetch MakerWorld design metadata and apply it to a Manyfold model.
 
-    Best-effort: sets description + tags, and attaches the cover image. Any
-    individual failure is logged (debug) and skipped — never raises.
+    Best-effort: sets name, description (Markdown), tags, creator, and attaches
+    the cover image — also setting it as the model's preview_file. Reuses a
+    pre-fetched ``design`` when given (avoids a second resolve). Any individual
+    failure is logged (debug) and skipped — never raises.
     """
-    design = get_makerworld_design(session, source_url)
+    if design is None:
+        design = get_makerworld_design(session, source_url)
     if not design:
         return
 
-    description = _html_to_text(design.get("summary"))
+    title = (design.get("title") or "").strip() or None
+    description = _html_to_markdown(design.get("summary"))
     tags = _extract_makerworld_tags(design)
-    if description or tags:
-        if patch_manyfold_model_metadata(session, model_id, description=description, tag_list=tags):
-            bits = []
-            if description:
-                bits.append("description")
-            if tags:
-                bits.append(f"{len(tags)} tag(s)")
+    creator_name = (design.get("designCreator") or {}).get("name")
+    creator_at_id = ensure_manyfold_creator(session, creator_name) if creator_name else None
+
+    if patch_manyfold_model_metadata(
+        session, model_id,
+        name=title, description=description, tag_list=tags, creator_at_id=creator_at_id,
+    ):
+        bits = []
+        if title:
+            bits.append(f"name='{title}'")
+        if description:
+            bits.append("description")
+        if tags:
+            bits.append(f"{len(tags)} tag(s)")
+        if creator_at_id:
+            bits.append(f"creator='{creator_name}'")
+        if bits:
             dprint(f"    📝 Set {', '.join(bits)}")
 
     cover_url = design.get("coverUrl") or design.get("cover")
     if cover_url:
         ext = _image_ext_from_url(cover_url)
-        safe_name = re.sub(r"[^\w.-]+", "_", model_name)[:60] or "cover"
+        safe_name = re.sub(r"[^\w.-]+", "_", title or model_name)[:60] or "cover"
         with tempfile.TemporaryDirectory() as tmpdir:
             img_dest = Path(tmpdir) / f"{safe_name}_cover{ext}"
-            if download_makerworld_image(session, cover_url, img_dest):
-                if add_image_to_manyfold_model(session, model_id, img_dest):
-                    dprint("    🖼  Attached MakerWorld cover image")
+            if download_makerworld_image(session, cover_url, img_dest) and \
+                    add_image_to_manyfold_model(session, model_id, img_dest):
+                dprint("    🖼  Attached MakerWorld cover image")
+                # Set it as the preview once the async file job has processed it.
+                preview_at_id = find_manyfold_model_image_file(session, model_id)
+                if preview_at_id:
+                    if patch_manyfold_model_metadata(session, model_id, preview_file_at_id=preview_at_id):
+                        dprint("    ⭐ Set cover as preview file")
+                else:
+                    dprint("    (image added but couldn't locate it to set as preview)")
 
 
 def create_manyfold_model_from_upload(
@@ -616,6 +847,7 @@ def create_manyfold_model_from_upload(
     source_text: str = "Source",
     add_link: bool = True,
     enrich: bool = False,
+    design: dict | None = None,
 ) -> bool:
     """Create a model in Manyfold from a previously-uploaded Tus file.
 
@@ -625,9 +857,9 @@ def create_manyfold_model_from_upload(
     If ``source_url`` is given, the model is located after the async creation
     job runs; with ``add_link`` the URL is PATCHed on as a link (the upload
     endpoint can't accept links directly), and with ``enrich`` the MakerWorld
-    design metadata (description, tags, cover image) is fetched and applied.
-    All of this is best-effort: a failure to find the model in time logs a
-    warning but doesn't fail the sync.
+    design metadata (description, tags, creator, cover image) is applied. When
+    ``design`` is provided it's reused (the caller already resolved it to name
+    the model); otherwise enrich resolves it. All best-effort.
     """
     # Snapshot existing model IDs first so we can detect the newly-created one
     # by diff after the async job runs (needed to attach a link / enrich).
@@ -659,10 +891,12 @@ def create_manyfold_model_from_upload(
     if need_lookup:
         model_id = _poll_for_new_manyfold_model(session, existing_ids)
         if model_id:
-            if add_link and add_manyfold_model_link(session, model_id, source_url, source_text):
+            # No custom link text — Manyfold renders its own site-derived label
+            # (e.g. "MakerWorld"). Sending our own text just doubles up next to it.
+            if add_link and add_manyfold_model_link(session, model_id, source_url):
                 dprint(f"    🔗 Linked {source_text}: {source_url}")
             if enrich and source_text == "MakerWorld":
-                enrich_manyfold_model_from_makerworld(session, model_id, name, source_url)
+                enrich_manyfold_model_from_makerworld(session, model_id, name, source_url, design=design)
         else:
             print(f"    ⚠️  Created '{name}' but couldn't locate it to attach the source link / details.")
 
@@ -742,13 +976,14 @@ def upload_model_to_manyfold(
     source_text: str = "Source",
     add_link: bool = True,
     enrich: bool = False,
+    design: dict | None = None,
 ) -> bool:
     """Tus-upload a file and create a model from it in Manyfold.
 
     Wraps the two-step Manyfold flow (tus upload → POST /models) so the
     sync loops have a single call site. Honours dry_run. When ``source_url``
     is given, ``add_link`` attaches it as a link and ``enrich`` applies the
-    MakerWorld description/tags/cover image (both best-effort).
+    MakerWorld details (both best-effort). A pre-fetched ``design`` is reused.
     """
     if dry_run:
         note = ""
@@ -764,7 +999,8 @@ def upload_model_to_manyfold(
         return False
     return create_manyfold_model_from_upload(
         session, model_name, upload_url, file_path.name, collection_at_id,
-        source_url=source_url, source_text=source_text, add_link=add_link, enrich=enrich,
+        source_url=source_url, source_text=source_text, add_link=add_link,
+        enrich=enrich, design=design,
     )
 
 
@@ -911,9 +1147,27 @@ def sync_library_files(
         while Path(model_name).suffix.lower() in STRIP_EXTS:
             model_name = Path(model_name).stem
 
+        # State-file skip first — cheapest, no network.
         if file_id in synced_ids and not force:
             tqdm.write(f"  ⏭  Already synced: {model_name}")
             continue
+
+        source_url = makerworld_urls.get(file_id) if (add_source_links or enrich_from_makerworld) else None
+
+        # Resolve the MakerWorld design BEFORE the name-dedup check, so the model
+        # is named with (and de-duplicated against) the MakerWorld title from the
+        # start — no post-create rename, so re-runs recognise it consistently.
+        design = None
+        if source_url and enrich_from_makerworld and not dry_run:
+            design = get_makerworld_design(session, source_url)
+            title = (design or {}).get("title")
+            if title and title.strip():
+                model_name = title.strip()
+
+        if source_url:
+            tqdm.write(f"  🔗 MakerWorld source: {source_url}")
+        elif need_urls:
+            dprint(f"    (no MakerWorld link for file id {file_id} — not in recent-imports window)")
 
         if model_name in existing_names:
             tqdm.write(f"  ⏭  Already in Manyfold (skipping duplicate): {model_name}")
@@ -938,16 +1192,12 @@ def sync_library_files(
                 continue
 
             collection_at_id = _ensure_collection(folder_id)
-            source_url = makerworld_urls.get(file_id) if (add_source_links or enrich_from_makerworld) else None
-            if source_url:
-                tqdm.write(f"  🔗 MakerWorld source: {source_url}")
-            elif need_urls:
-                dprint(f"    (no MakerWorld link for file id {file_id} — not in recent-imports window)")
             tqdm.write(f"  ↑  Uploading to Manyfold: {label}")
             ok = upload_model_to_manyfold(
                 session, model_name, dest, collection_at_id, dry_run,
                 source_url=source_url, source_text="MakerWorld",
                 add_link=add_source_links, enrich=enrich_from_makerworld,
+                design=design,
             )
 
         if ok:

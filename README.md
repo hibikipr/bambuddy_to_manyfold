@@ -133,9 +133,9 @@ Workflow:
   state file lists them as synced (equivalent to `--force`).
 - **Add MakerWorld links** — attach the MakerWorld source URL (for library files
   imported from MakerWorld) as a clickable link on the created Manyfold model.
-- **Fetch MakerWorld details (description + cover)** — pull the model's
-  description, tags, and cover image from MakerWorld and apply them to the
-  Manyfold model.
+- **Fetch MakerWorld details (description + cover)** — pull the model's name,
+  description, tags, creator, and cover image from MakerWorld and apply them to
+  the Manyfold model (the cover is also set as the model's preview image).
 - **Log debug** — show verbose diagnostics (pagination, scope probe, etc.).
 
 Output streams live into the log pane, colour-coded, with a timestamped marker
@@ -160,13 +160,20 @@ at the start of each load/sync.
   MakerWorld" carry a source URL. The sync fetches these from
   `GET /makerworld/recent-imports` and, after a model is created, PATCHes the URL
   on as a Manyfold link. When **enrichment** is enabled it also resolves the
-  MakerWorld design (via Bambuddy's `POST /makerworld/resolve`) and applies the
-  **description** (notes), **tags** (keywords), and **cover image** (uploaded as
-  a model file) to the Manyfold model. Because `recent-imports` is capped at 50
-  rows, only the 50 most recent MakerWorld imports get links/details; the upload
-  endpoint can't accept links or images directly, so all of this is a best-effort
-  follow-up after the async model-creation job (a file still syncs if the model
-  can't be located in time).
+  MakerWorld design (via Bambuddy's `POST /makerworld/resolve`) and applies to
+  the Manyfold model:
+    - **name** ← the MakerWorld design title (resolved *before* creation, so the
+      model is named — and de-duplicated — by its title from the start)
+    - **description** (notes) ← the design summary, converted from HTML to Markdown
+    - **tags** (keywords) ← the design tags
+    - **creator** ← the MakerWorld designer (found or created in Manyfold by name)
+    - **cover image** ← uploaded as a model file and set as the model's preview
+
+  Because `recent-imports` is capped at 50 rows, only the 50 most recent
+  MakerWorld imports get links/details; the upload endpoint can't accept links,
+  metadata or images directly, so all of this is a best-effort follow-up after
+  the async model-creation job (a file still syncs if the model can't be located
+  in time).
 
 ---
 
