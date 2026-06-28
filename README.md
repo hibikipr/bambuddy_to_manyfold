@@ -262,4 +262,14 @@ at the start of each load/sync.
 
 ---
 
+## License
+
+Licensed under the **GNU Affero General Public License v3.0 or later**
+(AGPL-3.0-or-later) — the same license as Bambuddy and Manyfold, the projects
+this tool integrates with. See [LICENSE](LICENSE) for the full text.
+
+Copyright © 2026 Victor Manuel ([hibikipr](https://github.com/hibikipr)).
+
+---
+
 🤖 Built with [Claude Code](https://claude.com/claude-code)
