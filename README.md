@@ -16,7 +16,7 @@ re-runs only upload new items.
 
 ## Tested with
 
-- **Bambuddy** v0.2.4.7
+- **Bambuddy** v0.2.4.8
 - **Manyfold** v0.142.0 (`dbd95979`)
 
 Other versions may work but aren't verified — the script depends on Manyfold's

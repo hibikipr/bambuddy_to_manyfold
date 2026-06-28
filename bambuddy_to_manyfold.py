@@ -119,30 +119,35 @@ def bambuddy_headers() -> dict:
 
 
 def get_bambuddy_archives(session: requests.Session) -> list:
-    """Fetch all print archives (completed 3MF prints) from Bambuddy."""
-    archives = []
-    page = 1
+    """Fetch ALL print archives from Bambuddy.
+
+    Bambuddy's ``GET /archives/`` paginates with ``limit`` / ``offset`` and
+    returns a bare list (default limit 50), so we walk offsets until a short
+    page. (Earlier versions of this helper sent ``page``/``per_page``, which
+    the API silently ignores — capping the result at the first 50 archives.)
+    """
+    archives: list = []
+    offset = 0
     print("  Fetching Bambuddy archives...")
     while True:
         resp = session.get(
             f"{BAMBUDDY_URL}/api/v1/archives/",
-            params={"page": page, "per_page": PAGE_SIZE, "status": "success"},
+            params={"limit": PAGE_SIZE, "offset": offset},
             headers=bambuddy_headers(),
             timeout=30,
         )
         resp.raise_for_status()
         data = resp.json()
-        # Handle plain list or paginated dict
+        # Bare list (current API) or a paginated dict (defensive).
         if isinstance(data, list):
             batch = data
         else:
             batch = data.get("archives", data.get("items", []))
         archives.extend(batch)
-        dprint(f"    Page {page}: {len(batch)} archives (total so far: {len(archives)})")
-        total = data.get("total", len(archives)) if isinstance(data, dict) else len(archives)
-        if not batch or len(archives) >= total:
+        dprint(f"    offset {offset}: {len(batch)} archives (total so far: {len(archives)})")
+        if len(batch) < PAGE_SIZE:   # short page → no more
             break
-        page += 1
+        offset += PAGE_SIZE
     return archives
 
 
