@@ -1,0 +1,24 @@
+services:
+  bambuddy-to-manyfold:
+    build: .
+    # Or, once you publish an image:
+    # image: ghcr.io/hibikipr/bambuddy_to_manyfold:latest
+    container_name: bambuddy_to_manyfold
+    restart: unless-stopped
+    ports:
+      - "8089:8089"
+    # Config comes from a .env file beside this compose file (gitignored) —
+    # these are just initial defaults; everything can also be edited later in
+    # the web UI's Configuration card, which persists to the /data volume.
+    #   BAMBUDDY_URL=https://your-bambuddy.example.com
+    #   BAMBUDDY_API_KEY=bb_xxx
+    #   MANYFOLD_URL=https://your-manyfold.example.com
+    #   MANYFOLD_CLIENT_ID=...
+    #   MANYFOLD_CLIENT_SECRET=...
+    env_file:
+      - .env
+    volumes:
+      - bambuddy_manyfold_data:/data   # persists sync-state JSON + web config JSON
+
+volumes:
+  bambuddy_manyfold_data:

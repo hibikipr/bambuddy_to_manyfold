@@ -14,6 +14,11 @@ bambuddy_sync_state.json
 
 # GUI config saved to the project dir if SYNC_STATE_FILE points here
 .bambuddy_to_manyfold_gui.json
+.bambuddy_to_manyfold_web.json
+
+# Docker env file with secrets — never commit
+.env
+*.local
 
 # OS / editor cruft
 .DS_Store
