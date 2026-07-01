@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bambuddy → Manyfold Sync</title>
+<!-- PWA -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#00ae42">
+<link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="B2M Sync">
+<meta name="application-name" content="B2M Sync">
+<style>html{background:#1a1a1a}</style>
+<style>
+  :root{
+    --bg:#1a1a1a; --card:#2d2d2d; --tertiary:#3d3d3d; --green:#00ae42;
+    --green-light:#00c64d; --fg:#e8e8e8; --muted:#a0a0a0; --danger:#e0533d;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-text-size-adjust:100%;overscroll-behavior-y:contain}
+  #ptr{position:fixed;top:0;left:0;right:0;height:calc(56px + env(safe-area-inset-top));
+    padding-top:env(safe-area-inset-top);
+    display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted);
+    font-size:13px;background:var(--bg);transform:translateY(-100%);z-index:30;pointer-events:none}
+  #ptrIcon{font-size:18px;display:inline-block;transition:transform .15s}
+  @keyframes ptrspin{to{transform:rotate(360deg)}}
+  header{padding:16px;padding-top:calc(16px + env(safe-area-inset-top));
+    display:flex;align-items:center;gap:10px;
+    border-bottom:1px solid #333;position:sticky;top:0;background:var(--bg);z-index:5}
+  header h1{font-size:18px;margin:0;font-weight:600}
+  .cube{width:26px;height:26px;flex:0 0 auto}
+  main{padding:16px;max-width:900px;margin:0 auto;
+    padding-bottom:calc(48px + env(safe-area-inset-bottom))}
+  .card{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+  .card h2{font-size:14px;margin:0 0 10px;color:var(--green-light);font-weight:600}
+  .muted{color:var(--muted);font-size:13px}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input,select,button,textarea{font-size:15px;font-family:inherit}
+  input,select,textarea{width:100%;padding:10px;border-radius:9px;border:1px solid #4a4a4a;
+    background:#1f1f1f;color:var(--fg)}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--green)}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:160px}
+  .field-with-toggle{display:flex;align-items:center;gap:8px}
+  .field-with-toggle input{flex:1}
+  .show-toggle{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);white-space:nowrap;width:auto}
+  .show-toggle input{width:auto;padding:0}
+  button{cursor:pointer;border:none;border-radius:10px;padding:11px 16px;font-weight:600}
+  .btn-primary{background:var(--green);color:#0a0a0a}
+  .btn-primary:disabled{background:#066b2c;color:#5a5a5a;cursor:not-allowed}
+  .btn-secondary{background:var(--tertiary);color:var(--fg)}
+  .btn-secondary:disabled{color:#6a6a6a;cursor:not-allowed}
+  .btn-danger{background:var(--tertiary);color:var(--danger)}
+  .btn-danger:disabled{color:#6a6a6a;cursor:not-allowed}
+  .full{width:100%}
+  .options-bar{display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:12px}
+  .opt{display:flex;align-items:center;gap:6px;font-size:13px}
+  .opt input{width:auto}
+  .actions-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .actions-bar button{flex:0 0 auto;width:auto}
+  .progress{height:3px;background:var(--tertiary);border-radius:2px;overflow:hidden;margin-bottom:12px;display:none}
+  .progress.active{display:block}
+  .progress-bar{height:100%;width:30%;background:var(--green);animation:indet 1.1s ease-in-out infinite}
+  @keyframes indet{0%{margin-left:-30%}100%{margin-left:100%}}
+  .status-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}
+  .tabs{display:flex;gap:4px;border-bottom:1px solid #444;margin-bottom:10px}
+  .tab-btn{background:none;color:var(--muted);border-radius:8px 8px 0 0;padding:8px 14px;font-size:13px}
+  .tab-btn.active{background:var(--tertiary);color:var(--green-light)}
+  .tab-panel{display:none}
+  .tab-panel.active{display:block}
+  .list-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px;font-size:13px;color:var(--muted)}
+  .list-toolbar select{width:auto;padding:6px 8px}
+  .list-toolbar .opt{font-size:12px}
+  .list-toolbar .spacer{flex:1}
+  .list-toolbar button{padding:6px 10px;font-size:12px;width:auto}
+  .model-list{max-height:320px;overflow-y:auto;border:1px solid #3a3a3a;border-radius:9px}
+  .model-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #333;cursor:pointer;font-size:13px}
+  .model-row:last-child{border-bottom:none}
+  .model-row:hover{background:#252525}
+  .model-row.synced{color:#888}
+  .model-row input{width:auto}
+  .model-row .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .model-row .date{flex:0 0 90px;color:var(--muted);font-size:12px}
+  .model-row .status{flex:0 0 60px;font-size:11px;text-align:right}
+  .model-head{display:flex;align-items:center;gap:10px;padding:6px 10px;font-size:11px;color:var(--muted);cursor:pointer;user-select:none}
+  .model-head span{flex:0 0 auto}
+  .model-head .name{flex:1}
+  .model-head .date{flex:0 0 90px}
+  .model-head .status{flex:0 0 60px;text-align:right}
+  .log-pane{background:#101010;border-radius:9px;padding:10px;font-family:Menlo,Consolas,monospace;
+    font-size:12px;max-height:320px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+  .log-pane .ok{color:var(--green-light)}
+  .log-pane .warn{color:#e0a800}
+  .log-pane .err{color:var(--danger)}
+  .log-pane .info{color:var(--muted)}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+    padding:12px 18px;border-radius:10px;font-weight:600;max-width:90%;text-align:center;
+    box-shadow:0 6px 24px rgba(0,0,0,.4);z-index:20}
+  .toast.ok{background:var(--green);color:#0a0a0a}
+  .toast.err{background:var(--danger);color:#fff}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div id="ptr"><span id="ptrIcon">↓</span><span id="ptrText">Pull to refresh</span></div>
+<header>
+  <svg class="cube" viewBox="0 0 64 64" aria-hidden="true">
+    <polygon points="32,8 8,22 32,36 56,22" fill="#00c64d"/>
+    <polygon points="8,22 8,46 32,60 32,36" fill="#00ae42"/>
+    <polygon points="56,22 56,46 32,60 32,36" fill="#009438"/>
+  </svg>
+  <h1>Bambuddy → Manyfold Sync</h1>
+</header>
+
+<main>
+  <!-- Config -->
+  <div class="card">
+    <h2>Configuration</h2>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <div class="muted" style="flex:1"><span id="dot" class="status-dot" style="background:#888"></span><span id="health">Checking connections…</span></div>
+    </div>
+
+    <label>Bambuddy URL</label>
+    <input id="cfg_bambuddy_url" placeholder="http://localhost:8000">
+
+    <label>Bambuddy API key</label>
+    <div class="field-with-toggle">
+      <input id="cfg_bambuddy_api_key" type="password">
+      <label class="show-toggle"><input type="checkbox" data-reveal="cfg_bambuddy_api_key"> Show</label>
+    </div>
+
+    <label>Manyfold URL</label>
+    <input id="cfg_manyfold_url" placeholder="http://localhost:3214">
+
+    <div class="row">
+      <div>
+        <label>Manyfold client ID</label>
+        <div class="field-with-toggle">
+          <input id="cfg_manyfold_client_id" type="password">
+          <label class="show-toggle"><input type="checkbox" data-reveal="cfg_manyfold_client_id"> Show</label>
+        </div>
+      </div>
+      <div>
+        <label>Manyfold client secret</label>
+        <div class="field-with-toggle">
+          <input id="cfg_manyfold_client_secret" type="password">
+          <label class="show-toggle"><input type="checkbox" data-reveal="cfg_manyfold_client_secret"> Show</label>
+        </div>
+      </div>
+    </div>
+
+    <label>Manyfold token (alt — used only if client ID/secret are blank)</label>
+    <div class="field-with-toggle">
+      <input id="cfg_manyfold_token" type="password">
+      <label class="show-toggle"><input type="checkbox" data-reveal="cfg_manyfold_token"> Show</label>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Manyfold library ID</label>
+        <input id="cfg_manyfold_library_id">
+      </div>
+      <div>
+        <label>Sync state file</label>
+        <input id="cfg_sync_state_file">
+      </div>
+    </div>
+
+    <button id="saveConfigBtn" class="btn-primary full" style="margin-top:14px">Save config</button>
+  </div>
+
+  <!-- Options + actions -->
+  <div class="card">
+    <h2>Sync options</h2>
+    <div class="options-bar">
+      <label class="opt"><input type="checkbox" id="opt_dry_run"> Dry run (no uploads)</label>
+      <label class="opt"><input type="checkbox" id="opt_create_missing" checked> Create missing models</label>
+      <label class="opt"><input type="checkbox" id="opt_force"> Force re-sync</label>
+      <label class="opt"><input type="checkbox" id="opt_add_links" checked> Add MakerWorld links</label>
+      <label class="opt"><input type="checkbox" id="opt_enrich" checked> Fetch MakerWorld details</label>
+      <label class="opt"><input type="checkbox" id="opt_group" checked> Group MakerWorld profiles</label>
+      <label class="opt"><input type="checkbox" id="opt_debug"> Log debug</label>
+    </div>
+    <div class="actions-bar">
+      <button id="loadBtn" class="btn-primary">⟳ Load models</button>
+      <button id="runBtn" class="btn-primary" disabled>▶ Run sync</button>
+      <button id="stopBtn" class="btn-danger" disabled>⬛ Stop</button>
+      <button id="cleanupBtn" class="btn-secondary">🧹 Clean empty models</button>
+    </div>
+    <div id="progress" class="progress"><div class="progress-bar"></div></div>
+  </div>
+
+  <!-- Model selection -->
+  <div class="card">
+    <h2>Model selection — click a row to toggle, or a column header to sort</h2>
+    <div class="list-toolbar">
+      <span>Sort by:</span>
+      <select id="sortKey"><option value="name">Name</option><option value="date">Date</option><option value="status">Status</option></select>
+      <label class="opt"><input type="checkbox" id="sortDesc"> Descending</label>
+      <label class="opt"><input type="checkbox" id="hideSynced"> Hide already-synced</label>
+      <span class="spacer"></span>
+    </div>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="archives">Archives (<span id="archCount">0</span>)</button>
+      <button class="tab-btn" data-tab="library">Library files (<span id="libCount">0</span>)</button>
+    </div>
+    <div class="tab-panel active" data-tab="archives">
+      <div class="list-toolbar">
+        <button id="archAll" class="btn-secondary">Select all</button>
+        <button id="archNone" class="btn-secondary">Select none</button>
+      </div>
+      <div class="model-head" data-list="archives">
+        <span style="flex:0 0 18px"></span>
+        <span class="name" data-key="name">Name</span>
+        <span class="date" data-key="date">Date</span>
+        <span class="status" data-key="status">Status</span>
+      </div>
+      <div id="archList" class="model-list"></div>
+    </div>
+    <div class="tab-panel" data-tab="library">
+      <div class="list-toolbar">
+        <button id="libAll" class="btn-secondary">Select all</button>
+        <button id="libNone" class="btn-secondary">Select none</button>
+      </div>
+      <div class="model-head" data-list="library">
+        <span style="flex:0 0 18px"></span>
+        <span class="name" data-key="name">Name</span>
+        <span class="date" data-key="date">Date</span>
+        <span class="status" data-key="status">Status</span>
+      </div>
+      <div id="libList" class="model-list"></div>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0">Output</h2>
+      <button id="clearLogBtn" class="btn-secondary" style="width:auto;padding:6px 10px;font-size:12px">Clear log</button>
+    </div>
+    <div id="log" class="log-pane" style="margin-top:8px"></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// Register the service worker (enables installable PWA). Needs https or localhost.
+if('serviceWorker' in navigator && window.isSecureContext){
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+}
+
+// ── Pull-to-refresh (custom, for standalone PWA where native is disabled) ──
+(function(){
+  const ptr=$('ptr'), icon=$('ptrIcon'), txt=$('ptrText');
+  const TRIGGER=90;
+  let startY=0, pull=0, active=false;
+  const atTop = () => (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+
+  window.addEventListener('touchstart', e => {
+    if(e.touches.length===1 && atTop()){ startY=e.touches[0].clientY; active=true; ptr.style.transition='none'; }
+  }, {passive:true});
+
+  window.addEventListener('touchmove', e => {
+    if(!active) return;
+    pull = e.touches[0].clientY - startY;
+    if(pull>0 && atTop()){
+      e.preventDefault();
+      const H = ptr.offsetHeight || 56;
+      const off = Math.min(pull*0.55, 72);
+      ptr.style.transform = 'translateY('+(off-H)+'px)';
+      const past = pull>=TRIGGER;
+      icon.style.transform = past ? 'rotate(180deg)' : 'rotate(0deg)';
+      txt.textContent = past ? 'Release to refresh' : 'Pull to refresh';
+    } else { active=false; }
+  }, {passive:false});
+
+  window.addEventListener('touchend', () => {
+    if(!active) return; active=false;
+    ptr.style.transition='transform .25s';
+    if(pull>=TRIGGER){
+      ptr.style.transform='translateY(0)';
+      txt.textContent='Refreshing…'; icon.textContent='↻';
+      icon.style.animation='ptrspin .8s linear infinite';
+      setTimeout(()=>location.reload(), 350);
+    } else {
+      ptr.style.transform='translateY(-100%)';
+    }
+    pull=0;
+  });
+})();
+
+function toast(msg, ok=true){
+  const t=document.createElement('div');
+  t.className='toast '+(ok?'ok':'err'); t.textContent=msg;
+  document.body.appendChild(t); setTimeout(()=>t.remove(), 3500);
+}
+
+// ── Config ──
+const CFG_FIELDS = ['bambuddy_url','bambuddy_api_key','manyfold_url','manyfold_client_id',
+  'manyfold_client_secret','manyfold_token','manyfold_library_id','sync_state_file'];
+const SECRET_FIELDS = ['bambuddy_api_key','manyfold_client_id','manyfold_client_secret','manyfold_token'];
+
+async function loadConfig(){
+  const d = await (await fetch('/api/config')).json();
+  CFG_FIELDS.forEach(k => { $('cfg_'+k).value = d[k] || ''; });
+  $('opt_debug').checked = !!d.debug;
+}
+
+document.querySelectorAll('[data-reveal]').forEach(cb => {
+  cb.addEventListener('change', async () => {
+    const fieldId = cb.getAttribute('data-reveal');
+    const input = $(fieldId);
+    if(cb.checked){
+      const d = await (await fetch('/api/config?reveal=1')).json();
+      const key = fieldId.replace('cfg_','');
+      input.value = d[key] || '';
+      input.type = 'text';
+    } else {
+      input.type = 'password';
+    }
+  });
+});
+
+$('saveConfigBtn').onclick = async () => {
+  const body = {};
+  CFG_FIELDS.forEach(k => { body[k] = $('cfg_'+k).value.trim(); });
+  body.debug = $('opt_debug').checked;
+  try{
+    const r = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if(d.ok){ toast('Config saved'); checkHealth(); }
+    else { toast('Missing: '+(d.missing||[]).join(', '), false); }
+  }catch(e){ toast('Save failed', false); }
+};
+
+async function checkHealth(){
+  try{
+    const d = await (await fetch('/api/health')).json();
+    if(d.ok){
+      $('dot').style.background = 'var(--green)';
+      $('health').textContent = 'Connected — '+d.bambuddy_url+' → '+d.manyfold_url;
+    } else {
+      $('dot').style.background = 'var(--danger)';
+      $('health').textContent = d.error || 'Not connected';
+    }
+  }catch(e){ $('health').textContent = 'Server error'; }
+}
+
+// ── Model lists (mirrors the Tkinter CheckTree: data model + sort/filter render) ──
+let archiveRows = [];
+let libraryRows = [];
+let sortKey = 'name', sortDesc = false, hideSynced = false;
+
+function fmtDate(v){ return v && v.length>=10 ? v.slice(0,10) : (v||''); }
+
+function sortRows(rows){
+  const copy = rows.slice();
+  copy.sort((a,b) => {
+    let av, bv;
+    if(sortKey==='date'){ av=a.date||''; bv=b.date||''; }
+    else if(sortKey==='status'){ av=a.status; bv=b.status; }
+    else { av=a.name.toLowerCase(); bv=b.name.toLowerCase(); }
+    if(av<bv) return sortDesc?1:-1;
+    if(av>bv) return sortDesc?-1:1;
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
+  return copy;
+}
+
+function renderList(container, rows){
+  container.innerHTML = '';
+  let visible = rows;
+  if(hideSynced) visible = visible.filter(r => r.status !== 'synced');
+  visible = sortRows(visible);
+  visible.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'model-row' + (r.status==='synced' ? ' synced' : '');
+    row.innerHTML = `<input type="checkbox" ${r.checked?'checked':''}>` +
+      `<span class="name">${escapeHtml(r.name)}</span>` +
+      `<span class="date">${escapeHtml(fmtDate(r.date))}</span>` +
+      `<span class="status">${r.status}</span>`;
+    row.onclick = (e) => {
+      r.checked = !r.checked;
+      row.querySelector('input').checked = r.checked;
+    };
+    row.querySelector('input').onclick = (e) => e.stopPropagation();
+    row.querySelector('input').onchange = (e) => { r.checked = e.target.checked; };
+    container.appendChild(row);
+  });
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderAll(){
+  renderList($('archList'), archiveRows);
+  renderList($('libList'), libraryRows);
+  $('archCount').textContent = archiveRows.length + ' · ' + archiveRows.filter(r=>r.status==='synced').length + ' synced';
+  $('libCount').textContent = libraryRows.length + ' · ' + libraryRows.filter(r=>r.status==='synced').length + ' synced';
+}
+
+$('sortKey').onchange = () => { sortKey = $('sortKey').value; renderAll(); };
+$('sortDesc').onchange = () => { sortDesc = $('sortDesc').checked; renderAll(); };
+$('hideSynced').onchange = () => { hideSynced = $('hideSynced').checked; renderAll(); };
+
+document.querySelectorAll('.model-head [data-key]').forEach(el => {
+  el.style.cursor = 'pointer';
+  el.onclick = () => {
+    const key = el.getAttribute('data-key');
+    if(sortKey === key) sortDesc = !sortDesc; else { sortKey = key; sortDesc = false; }
+    $('sortKey').value = sortKey; $('sortDesc').checked = sortDesc;
+    renderAll();
+  };
+});
+
+$('archAll').onclick = () => { archiveRows.forEach(r => r.checked = true); renderAll(); };
+$('archNone').onclick = () => { archiveRows.forEach(r => r.checked = false); renderAll(); };
+$('libAll').onclick = () => { libraryRows.forEach(r => r.checked = true); renderAll(); };
+$('libNone').onclick = () => { libraryRows.forEach(r => r.checked = false); renderAll(); };
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelector(`.tab-panel[data-tab="${btn.dataset.tab}"]`).classList.add('active');
+  };
+});
+
+function applyModels(data){
+  archiveRows = (data.archives||[]).map(r => ({...r, checked: r.status !== 'synced'}));
+  libraryRows = (data.library_files||[]).map(r => ({...r, checked: r.status !== 'synced'}));
+  renderAll();
+  if(archiveRows.length || libraryRows.length) $('runBtn').disabled = false;
+}
+
+// ── Log pane ──
+function appendLog(text){
+  const pane = $('log');
+  let tag = '';
+  if(/[✅↑⏭]/.test(text)) tag = 'ok';
+  else if(/⚠️|dry-run|\[dry/.test(text)) tag = 'warn';
+  else if(/❌|Error|error|failed|Failed/.test(text)) tag = 'err';
+  else if(/Fetching|Syncing|Checking|ℹ️|↓/.test(text)) tag = 'info';
+  const span = document.createElement('span');
+  if(tag) span.className = tag;
+  span.textContent = text;
+  pane.appendChild(span);
+  pane.scrollTop = pane.scrollHeight;
+}
+$('clearLogBtn').onclick = () => { $('log').innerHTML = ''; };
+
+// ── Job control ──
+let currentJobKind = null;
+let eventSource = null;
+
+function setRunningUI(running){
+  $('loadBtn').disabled = running;
+  $('runBtn').disabled = running || (archiveRows.length===0 && libraryRows.length===0);
+  $('cleanupBtn').disabled = running;
+  $('stopBtn').disabled = !running;
+  $('progress').classList.toggle('active', running);
+}
+
+function openStream(){
+  if(eventSource) eventSource.close();
+  eventSource = new EventSource('/api/sync/stream');
+  eventSource.onmessage = (e) => {
+    try{ appendLog(JSON.parse(e.data).line); }catch(err){}
+  };
+  eventSource.addEventListener('done', (e) => {
+    eventSource.close();
+    eventSource = null;
+    setRunningUI(false);
+    let payload = {};
+    try{ payload = JSON.parse(e.data); }catch(err){}
+    onJobDone(currentJobKind, payload);
+    currentJobKind = null;
+  });
+  eventSource.addEventListener('idle', () => { eventSource.close(); eventSource = null; });
+  eventSource.onerror = () => { /* EventSource auto-reconnects; nothing to do */ };
+}
+
+function onJobDone(kind, payload){
+  const result = payload.result || {};
+  if(kind === 'load'){
+    if(result.archives || result.library_files) applyModels(result);
+    else fetchModels();
+  } else if(kind === 'sync'){
+    toast('Sync complete — '+(result.archives_added||0)+' archive(s), '+(result.library_added||0)+' file(s)');
+    if(!result.dry_run){
+      // Refresh statuses, mirroring the Tkinter GUI's auto-reload after a real sync.
+      setTimeout(startLoad, 500);
+    }
+  } else if(kind === 'cleanup'){
+    toast('Cleanup complete — '+(result.deleted||0)+' empty model(s) removed');
+  }
+}
+
+async function fetchModels(){
+  const d = await (await fetch('/api/models')).json();
+  applyModels(d);
+}
+
+async function startLoad(){
+  try{
+    const r = await fetch('/api/models/load', {method:'POST'});
+    const d = await r.json();
+    if(!d.ok){ toast(d.error || 'Could not start load', false); return; }
+    currentJobKind = 'load';
+    setRunningUI(true);
+    openStream();
+  }catch(e){ toast('Load failed', false); }
+}
+$('loadBtn').onclick = startLoad;
+
+$('runBtn').onclick = async () => {
+  if(!archiveRows.length && !libraryRows.length){ toast('Click "Load models" first', false); return; }
+  const selectedArchiveIds = archiveRows.filter(r=>r.checked).map(r=>r.id);
+  const selectedLibraryIds = libraryRows.filter(r=>r.checked).map(r=>r.id);
+  if(!selectedArchiveIds.length && !selectedLibraryIds.length){ toast('Select at least one model', false); return; }
+  const body = {
+    dry_run: $('opt_dry_run').checked,
+    create_missing: $('opt_create_missing').checked,
+    force: $('opt_force').checked,
+    add_links: $('opt_add_links').checked,
+    enrich: $('opt_enrich').checked,
+    group_makerworld: $('opt_group').checked,
+    selected_archive_ids: selectedArchiveIds,
+    selected_library_file_ids: selectedLibraryIds,
+  };
+  try{
+    const r = await fetch('/api/sync/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if(!d.ok){ toast(d.error || 'Could not start sync', false); return; }
+    currentJobKind = 'sync';
+    setRunningUI(true);
+    openStream();
+  }catch(e){ toast('Sync failed to start', false); }
+};
+
+$('stopBtn').onclick = async () => {
+  try{ await fetch('/api/sync/cancel', {method:'POST'}); appendLog('\n⚠️  Stop requested…\n'); }
+  catch(e){}
+};
+
+$('cleanupBtn').onclick = async () => {
+  const collection = prompt('Delete models with NO files in this collection.\n\nCollection name (or "ALL" for every collection):', 'MakerWorld');
+  if(collection === null) return;
+  const dryRun = $('opt_dry_run').checked;
+  if(!dryRun){
+    if(!confirm('This will permanently DELETE every model in "'+collection+'" that has no files. This cannot be undone. Continue?')) return;
+  }
+  try{
+    const r = await fetch('/api/cleanup/start', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({collection: collection.trim(), dry_run: dryRun})});
+    const d = await r.json();
+    if(!d.ok){ toast(d.error || 'Could not start cleanup', false); return; }
+    currentJobKind = 'cleanup';
+    setRunningUI(true);
+    openStream();
+  }catch(e){ toast('Cleanup failed to start', false); }
+};
+
+// ── Init ──
+(async function init(){
+  await loadConfig();
+  checkHealth();
+  await fetchModels();
+  try{
+    const status = await (await fetch('/api/sync/status')).json();
+    if(status.running){
+      currentJobKind = status.kind;
+      setRunningUI(true);
+      openStream();
+    }
+  }catch(e){}
+})();
+</script>
+</body>
+</html>

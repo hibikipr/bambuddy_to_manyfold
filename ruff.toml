@@ -1,0 +1,5 @@
+[lint.per-file-ignores]
+# Pre-existing style nit in the CLI engine, which the web GUI conversion
+# deliberately leaves untouched (see README) rather than risk any behavior
+# change to code the CLI/GUI/web app all share.
+"bambuddy_to_manyfold.py" = ["E741"]

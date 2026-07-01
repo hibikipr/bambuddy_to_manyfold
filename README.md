@@ -81,8 +81,10 @@ instructions rather than failing halfway.
 ## Configuration
 
 All settings come from environment variables (or the defaults baked into the
-script). The GUI exposes the same settings as form fields and remembers them
-between runs.
+script). The desktop GUI and the web GUI each expose the same settings as
+form fields and remember them between runs — env vars are just the initial
+defaults; saving the form (in either GUI) persists an override to disk
+without needing to restart with new environment variables.
 
 | Variable | Required | Description |
 |---|---|---|
@@ -152,7 +154,7 @@ runs the script. Edit it with your values, then `./run_sync.sh [--dry-run]`.
 
 ---
 
-## GUI usage
+## Desktop GUI (Tkinter)
 
 ```bash
 python3 bambuddy_to_manyfold_gui.py
@@ -198,6 +200,77 @@ checkbox so you can preview first. Needs the `delete` OAuth scope.
 
 Output streams live into the log pane, colour-coded, with a timestamped marker
 at the start of each load/sync.
+
+---
+
+## Web GUI
+
+A browser-based version of the same workflow — handy for running the sync
+from a phone, tablet, or a headless server, and for deploying as a Docker
+container.
+
+```bash
+pip install flask requests tqdm
+python3 bambuddy_manyfold_web.py
+```
+
+Then open `http://<this-computer-ip>:8089/`. The workflow mirrors the desktop
+GUI: fill in the **Configuration** card and click **Save config** (secrets are
+masked, with a **Show** toggle per field, same as the desktop GUI), click
+**⟳ Load models** to fetch archives and library files with their synced/new
+status, tick the ones you want in the **Archives** / **Library files** tabs
+(select all/none, sort by name/date/status, hide already-synced), set your
+sync options, then click **▶ Run sync**. Progress streams live into the
+**Output** pane — you can close the tab and reopen it while a sync is running
+and the log picks back up where it left off. **🧹 Clean empty models** works
+the same as the desktop GUI's button.
+
+Config is saved to `WEB_CONFIG_FILE` (default `~/.bambuddy_to_manyfold_web.json`,
+or `/data/bambuddy_manyfold_web_config.json` inside the Docker image — see
+below), separate from the desktop GUI's own config file, so the two don't
+overwrite each other if you run both.
+
+### Install it as an app (PWA)
+
+The web GUI is an installable **PWA** — add it to your phone's home screen
+for a full-screen, app-like experience with its own icon:
+
+- **Android (Chrome):** menu ⋮ → *Add to Home screen* / *Install app*.
+- **iOS (Safari):** Share → *Add to Home Screen*.
+
+The installable PWA (service worker / offline shell) needs a **secure
+origin** (HTTPS or `localhost`) — serve it behind a reverse proxy with TLS
+(Caddy / nginx / Cloudflare Tunnel) or a local HTTPS tunnel (`cloudflared`,
+`ngrok`) if you want to install it from another device on your network.
+
+### Run with Docker
+
+```bash
+cp .env.example .env      # then edit .env with your Bambuddy + Manyfold details
+docker compose up -d --build
+```
+
+Or with a prebuilt image:
+
+```yaml
+image: ghcr.io/hibikipr/bambuddy_to_manyfold:latest
+```
+
+The `/data` volume holds both the sync-state JSON (`bambuddy_sync_state.json`)
+and the web config JSON — back both up together if you want to preserve sync
+history and saved credentials across a container rebuild.
+
+To add it to an existing compose stack:
+
+```yaml
+  bambuddy-to-manyfold:
+    build: ./bambuddy_to_manyfold      # or image: <your-built-image>
+    restart: unless-stopped
+    ports: ["8089:8089"]
+    env_file: [./bambuddy_to_manyfold/.env]
+    volumes: ["bambuddy_manyfold_data:/data"]
+# (add `bambuddy_manyfold_data:` under your top-level `volumes:`)
+```
 
 ---
 
