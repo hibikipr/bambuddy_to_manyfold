@@ -2,12 +2,12 @@
 """
 generate_icons.py — one-off generator for the web app's PWA icon set.
 
-Renders the same isometric Bambu-green cube used as the Tkinter GUI's window
-icon (see `_make_icon_png` in bambuddy_to_manyfold_gui.py), scaled up to the
-sizes a PWA manifest needs. Pure stdlib (struct + zlib), no Pillow.
+Same isometric cube geometry/size as the original Bambu-green icon (and as
+filament_to_bambuddy's icon), but recolored with Manyfold's blue-to-violet
+faceted-gem palette instead of Bambu green, so bambuddy_to_manyfold reads as
+"talks to Manyfold" while keeping the familiar large, bold cube silhouette.
 
-Run once at dev time; the output PNGs are committed to static/icons/ and are
-not regenerated at container build/run time.
+Pure stdlib (struct + zlib), no Pillow.
 
     python3 scripts/generate_icons.py
 
@@ -21,10 +21,12 @@ from pathlib import Path
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "static" / "icons"
 
-# Bambu-green cube faces (top light, left mid, right dark) — same palette as
-# the Tkinter GUI's window icon and the web UI's inline SVG header logo.
-FACE_COLORS = [(0, 198, 77), (0, 174, 66), (0, 148, 56)]
 BG_COLOR = (26, 26, 26)  # #1a1a1a, matches the app's theme background
+
+# Manyfold-style blue -> violet gradient, one pair of stops per cube face.
+TOP_A, TOP_B = (110, 231, 255), (139, 122, 255)     # #6ee7ff -> #8b7aff (light, top face)
+LEFT_A, LEFT_B = (79, 139, 255), (139, 92, 246)      # #4f8bff -> #8b5cf6 (mid, left face)
+RIGHT_A, RIGHT_B = (124, 79, 224), (192, 132, 252)   # #7c4fe0 -> #c084fc (deep, right face)
 
 
 def _png_chunk(typ: bytes, data: bytes) -> bytes:
@@ -42,28 +44,32 @@ def _write_png(path: Path, size: int, px: bytearray):
     path.write_bytes(data)
 
 
-def render_cube(size: int, scale: float = 1.0, opaque_bg: tuple[int, int, int] | None = None) -> bytearray:
-    """Render the isometric cube as RGBA pixels.
+def _lerp3(c1, c2, t):
+    return (
+        int(c1[0] + (c2[0] - c1[0]) * t),
+        int(c1[1] + (c2[1] - c1[1]) * t),
+        int(c1[2] + (c2[2] - c1[2]) * t),
+    )
+
+
+def render_cube(size: int, scale: float = 1.0, opaque_bg=None) -> bytearray:
+    """Render the isometric cube as RGBA pixels, faces filled with a gradient.
 
     ``scale`` shrinks the cube toward the center (used for the maskable icon,
     whose "safe zone" is roughly the middle 80% of the canvas). ``opaque_bg``
     fills everywhere outside the cube with a solid color instead of leaving it
-    transparent (needed for maskable icons and Apple touch icons, which don't
-    render transparency the way a regular favicon does).
+    transparent (needed for maskable icons and Apple touch icons).
     """
     s = size
     if opaque_bg is not None:
         r, g, b = opaque_bg
-        px = bytearray((r, g, b, 255) * (s * s))
-        # bytearray(tuple * n) above doesn't interleave correctly; build properly instead.
         px = bytearray()
         for _ in range(s * s):
             px.extend((r, g, b, 255))
     else:
         px = bytearray(s * s * 4)  # transparent RGBA
 
-    # Cube faces as parallelograms (origin + two edge vectors), in a 64-unit
-    # design grid, then scaled to `size` and re-centered by `scale`.
+    # Same 64-unit design grid as the original cube generator.
     f = (s / 64.0) * scale
     off = (s - s * scale) / 2.0
     T = (32 * f + off, 8 * f + off)
@@ -73,21 +79,24 @@ def render_cube(size: int, scale: float = 1.0, opaque_bg: tuple[int, int, int] |
     side = 24 * f
 
     faces = [
-        (T, (L[0] - T[0], L[1] - T[1]), (R[0] - T[0], R[1] - T[1]), FACE_COLORS[0]),
-        (L, (0, side), (B[0] - L[0], B[1] - L[1]), FACE_COLORS[1]),
-        (R, (0, side), (B[0] - R[0], B[1] - R[1]), FACE_COLORS[2]),
+        (T, (L[0] - T[0], L[1] - T[1]), (R[0] - T[0], R[1] - T[1]), TOP_A, TOP_B),
+        (L, (0, side), (B[0] - L[0], B[1] - L[1]), LEFT_A, LEFT_B),
+        (R, (0, side), (B[0] - R[0], B[1] - R[1]), RIGHT_A, RIGHT_B),
     ]
 
     for y in range(s):
         for x in range(s):
             cx, cy = x + 0.5, y + 0.5
-            for (ox, oy), (ux, uy), (vx, vy), (cr, cg, cb) in faces:
+            for (ox, oy), (ux, uy), (vx, vy), col_a, col_b in faces:
                 det = ux * vy - uy * vx
                 if det == 0:
                     continue
                 a = ((cx - ox) * vy - (cy - oy) * vx) / det
                 b = (ux * (cy - oy) - uy * (cx - ox)) / det
                 if -0.02 <= a <= 1.02 and -0.02 <= b <= 1.02:
+                    # gradient along the face's "b" axis (top-to-bottom of each facet)
+                    t = max(0.0, min(1.0, b))
+                    cr, cg, cb = _lerp3(col_a, col_b, t)
                     i = (y * s + x) * 4
                     px[i], px[i + 1], px[i + 2], px[i + 3] = cr, cg, cb, 255
                     break
@@ -98,16 +107,11 @@ def render_cube(size: int, scale: float = 1.0, opaque_bg: tuple[int, int, int] |
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Full-bleed, transparent background — for the manifest's "any" purpose icons.
     _write_png(OUT_DIR / "icon-192.png", 192, render_cube(192, scale=1.0))
     _write_png(OUT_DIR / "icon-512.png", 512, render_cube(512, scale=1.0))
 
-    # Maskable: opaque background, cube shrunk into the ~80% safe zone so OS
-    # icon masks (circle, squircle, etc.) don't clip it.
     _write_png(OUT_DIR / "maskable-512.png", 512, render_cube(512, scale=0.62, opaque_bg=BG_COLOR))
 
-    # Apple touch icon: iOS renders transparency as black, so use an opaque
-    # background at the standard 180x180 size.
     _write_png(OUT_DIR / "apple-touch-icon.png", 180, render_cube(180, scale=0.82, opaque_bg=BG_COLOR))
 
     print(f"Wrote icons to {OUT_DIR}")
