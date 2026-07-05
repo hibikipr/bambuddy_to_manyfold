@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import queue
+import subprocess
 import threading
 import time
 import uuid
@@ -54,6 +55,34 @@ app = Flask(__name__)
 
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8089"))
+
+
+def _get_version() -> str:
+    """Resolve the running app's version for display in the GUI footer.
+
+    Priority: APP_VERSION env var (baked in at Docker build time from the
+    release git tag, see Dockerfile + docker-publish.yml) > local `git
+    describe` (useful when running straight from a git checkout) > "dev".
+    """
+    env_version = os.getenv("APP_VERSION")
+    if env_version:
+        return env_version
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--always", "--dirty"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "dev"
+
+
+APP_VERSION = _get_version()
 
 
 # ── Config persistence ────────────────────────────────────────────────────────
@@ -395,7 +424,7 @@ def _run_cleanup(job: SyncJob, collection: str, dry_run: bool):
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", version=APP_VERSION)
 
 
 @app.get("/sw.js")

@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+# Set at build time from the release git tag (see .github/workflows/docker-publish.yml);
+# defaults to "dev" for a plain local `docker build` with no --build-arg.
+ARG VERSION=dev
+
 WORKDIR /app
 
 # Deps first for layer caching. gunicorn serves the Flask app in production.
@@ -13,7 +17,8 @@ COPY templates ./templates
 COPY static ./static
 
 # Sync-state + web config live on a mounted volume so they survive restarts.
-ENV SYNC_STATE_FILE=/data/bambuddy_sync_state.json \
+ENV APP_VERSION=$VERSION \
+    SYNC_STATE_FILE=/data/bambuddy_sync_state.json \
     WEB_CONFIG_FILE=/data/bambuddy_manyfold_web_config.json \
     HOST=0.0.0.0 \
     PORT=8089

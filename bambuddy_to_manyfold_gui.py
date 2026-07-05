@@ -39,6 +39,7 @@ import json
 import os
 import queue
 import struct
+import subprocess
 import threading
 import tkinter as tk
 import zlib
@@ -163,6 +164,32 @@ GRAY_LIGHT  = "#a0a0a0"
 GRAY_DARK   = "#4a4a4a"
 FG          = "#e8e8e8"   # primary text
 DANGER      = "#e0533d"   # stop / destructive
+
+
+def _get_version() -> str:
+    """Resolve the running app's version for display in the status bar.
+
+    This desktop GUI isn't containerized (only the web GUI ships in Docker,
+    see Dockerfile), so there's no build-time APP_VERSION to bake in here —
+    just a local `git describe` (useful when running from a git checkout,
+    the normal way to run this script) falling back to "dev".
+    """
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--always", "--dirty"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "dev"
+
+
+APP_VERSION = _get_version()
 
 
 def _ui_font_family() -> str:
@@ -433,6 +460,16 @@ class App(tk.Tk):
 
     def _build_ui(self):
         pad = {"padx": 10, "pady": 4}
+
+        # ── Version footer (bottom of window) ────────────────────────────────
+        # Packed first, with side="bottom", so it reserves its space before the
+        # rest of the UI (some of which expands to fill whatever's left).
+        footer = ttk.Frame(self)
+        footer.pack(side="bottom", fill="x", padx=10, pady=(0, 6))
+        ttk.Label(
+            footer, text=f"v{APP_VERSION}", style="Muted.TLabel",
+            font=(self._font[0], 9),
+        ).pack(side="right")
 
         # ── Config frame ──────────────────────────────────────────────────────
         cfg_frame = ttk.LabelFrame(self, text="Configuration")
