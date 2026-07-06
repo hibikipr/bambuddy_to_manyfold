@@ -467,7 +467,7 @@ class App(tk.Tk):
         footer = ttk.Frame(self)
         footer.pack(side="bottom", fill="x", padx=10, pady=(0, 6))
         ttk.Label(
-            footer, text=f"v{APP_VERSION}", style="Muted.TLabel",
+            footer, text=APP_VERSION, style="Muted.TLabel",
             font=(self._font[0], 9),
         ).pack(side="right")
 
