@@ -46,6 +46,15 @@ import zlib
 from pathlib import Path
 from tkinter import filedialog, font, messagebox, scrolledtext, simpledialog, ttk
 
+import i18n
+
+# Resolved once at import time from the OS locale (LANG/LC_ALL, or the
+# Windows regional setting via locale.getlocale()) — there's no per-request
+# header to read like the web app has, and a desktop app's language doesn't
+# change mid-session. See i18n.gui_locale().
+_translator = i18n.Translator(i18n.gui_locale())
+t = _translator.t
+
 
 # ── App icon ──────────────────────────────────────────────────────────────────
 
@@ -232,9 +241,9 @@ class CheckTree:
             selectmode="none",
         )
         self._tree.heading("check",  text="")
-        self._tree.heading("name",   text="Name",   command=lambda: self._header_sort("name"))
-        self._tree.heading("date",   text="Date",   command=lambda: self._header_sort("date"))
-        self._tree.heading("status", text="Status", command=lambda: self._header_sort("status"))
+        self._tree.heading("name",   text=t("common.action.name"),   command=lambda: self._header_sort("name"))
+        self._tree.heading("date",   text=t("common.action.date"),   command=lambda: self._header_sort("date"))
+        self._tree.heading("status", text=t("common.action.status"), command=lambda: self._header_sort("status"))
         self._tree.column("check",  width=30,  stretch=False, anchor="center")
         self._tree.column("name",   stretch=True,             anchor="w")
         self._tree.column("date",   width=90,  stretch=False, anchor="center")
@@ -343,7 +352,7 @@ class CheckTree:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Bambuddy → Manyfold Sync")
+        self.title(t("common.title"))
         self.resizable(True, True)
         self.minsize(760, 660)
         self._set_app_icon()
@@ -472,19 +481,19 @@ class App(tk.Tk):
         ).pack(side="right")
 
         # ── Config frame ──────────────────────────────────────────────────────
-        cfg_frame = ttk.LabelFrame(self, text="Configuration")
+        cfg_frame = ttk.LabelFrame(self, text=t("web.config_heading"))
         cfg_frame.pack(fill="x", **pad)
         cfg_frame.columnconfigure(1, weight=1)
 
         fields = [
-            ("Bambuddy URL",          "bambuddy_url",           False),
-            ("Bambuddy API key",      "bambuddy_api_key",       True),
-            ("Manyfold URL",          "manyfold_url",           False),
-            ("Manyfold client ID",    "manyfold_client_id",     True),
-            ("Manyfold client secret","manyfold_client_secret", True),
-            ("Manyfold token (alt)",  "manyfold_token",         True),
-            ("Manyfold library ID",   "manyfold_library_id",    False),
-            ("Sync state file",       "sync_state_file",        False),
+            (t("common.field.bambuddy_url"),            "bambuddy_url",           False),
+            (t("common.field.bambuddy_api_key"),        "bambuddy_api_key",       True),
+            (t("common.field.manyfold_url"),            "manyfold_url",           False),
+            (t("common.field.manyfold_client_id"),      "manyfold_client_id",     True),
+            (t("common.field.manyfold_client_secret"),  "manyfold_client_secret", True),
+            (t("gui.manyfold_token"),                   "manyfold_token",         True),
+            (t("common.field.manyfold_library_id"),     "manyfold_library_id",    False),
+            (t("common.field.sync_state_file"),         "sync_state_file",        False),
         ]
 
         self._vars: dict[str, tk.StringVar] = {}
@@ -506,13 +515,13 @@ class App(tk.Tk):
                 show_var = tk.BooleanVar(value=False)
                 self._show_vars[key] = show_var
                 ttk.Checkbutton(
-                    cfg_frame, text="Show",
+                    cfg_frame, text=t("common.field.show"),
                     variable=show_var,
                     command=lambda e=entry, v=show_var: e.configure(show="" if v.get() else "*"),
                 ).grid(row=row, column=2, padx=(0, 8), pady=3)
             elif key == "sync_state_file":
                 ttk.Button(
-                    cfg_frame, text="Browse…", width=8,
+                    cfg_frame, text=t("gui.browse"), width=8,
                     command=self._browse_state_file,
                 ).grid(row=row, column=2, padx=(0, 8), pady=3)
 
@@ -522,65 +531,65 @@ class App(tk.Tk):
 
         self._dry_run_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            top_btn_frame, text="Dry run (no uploads)", variable=self._dry_run_var
+            top_btn_frame, text=t("common.option.dry_run"), variable=self._dry_run_var
         ).pack(side="left", padx=(0, 12))
 
         self._create_missing_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            top_btn_frame, text="Create missing models in Manyfold", variable=self._create_missing_var
+            top_btn_frame, text=t("gui.opt_create_missing"), variable=self._create_missing_var
         ).pack(side="left", padx=(0, 12))
 
         self._force_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            top_btn_frame, text="Force re-sync (ignore sync state)", variable=self._force_var
+            top_btn_frame, text=t("gui.opt_force"), variable=self._force_var
         ).pack(side="left", padx=(0, 12))
 
         self._links_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            top_btn_frame, text="Add MakerWorld links", variable=self._links_var
+            top_btn_frame, text=t("common.option.add_links"), variable=self._links_var
         ).pack(side="left", padx=(0, 12))
 
         self._enrich_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            top_btn_frame, text="Fetch MakerWorld details (description + cover)",
+            top_btn_frame, text=t("gui.opt_enrich"),
             variable=self._enrich_var
         ).pack(side="left", padx=(0, 12))
 
         self._group_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            top_btn_frame, text="Group MakerWorld profiles into one model",
+            top_btn_frame, text=t("gui.opt_group"),
             variable=self._group_var
         ).pack(side="left", padx=(0, 12))
 
         self._debug_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            top_btn_frame, text="Log debug", variable=self._debug_var
+            top_btn_frame, text=t("common.option.debug"), variable=self._debug_var
         ).pack(side="left", padx=(0, 12))
 
         self._load_btn = ttk.Button(
-            top_btn_frame, text="⟳  Load models", command=self._start_load, style="Accent.TButton"
+            top_btn_frame, text=t("gui.load_models_button"), command=self._start_load, style="Accent.TButton"
         )
         self._load_btn.pack(side="left", padx=(0, 6))
 
         self._run_btn = ttk.Button(
-            top_btn_frame, text="▶  Run sync", command=self._start_sync,
+            top_btn_frame, text=t("gui.run_sync_button"), command=self._start_sync,
             state="disabled", style="Accent.TButton"
         )
         self._run_btn.pack(side="left", padx=(0, 6))
 
         self._stop_btn = ttk.Button(
-            top_btn_frame, text="⬛  Stop", command=self._request_stop,
+            top_btn_frame, text=t("gui.stop_button"), command=self._request_stop,
             state="disabled", style="Danger.TButton"
         )
         self._stop_btn.pack(side="left", padx=(0, 6))
 
         self._cleanup_btn = ttk.Button(
-            top_btn_frame, text="🧹  Clean empty models", command=self._start_cleanup
+            top_btn_frame, text=t("gui.cleanup_button"), command=self._start_cleanup
         )
         self._cleanup_btn.pack(side="left")
 
         ttk.Button(
-            top_btn_frame, text="Clear log", command=self._clear_log
+            top_btn_frame, text=t("common.action.clear_log"), command=self._clear_log
         ).pack(side="right")
 
         # ── Progress bar ──────────────────────────────────────────────────────
@@ -592,30 +601,38 @@ class App(tk.Tk):
         paned.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # ── Model selection pane ──────────────────────────────────────────────
-        sel_outer = ttk.LabelFrame(paned, text="Model selection  —  click a row to toggle (or a column header to sort)")
+        sel_outer = ttk.LabelFrame(paned, text=t("gui.model_selection_frame"))
         paned.add(sel_outer, weight=3)
 
-        # Sort + filter controls (apply to both tabs)
+        # Sort + filter controls (apply to both tabs). The combobox displays
+        # translated labels but _apply_view() needs the stable English sort
+        # key — _SORT_LABEL_TO_KEY maps the displayed (translated) label back
+        # to it, so translating the labels can't break sorting.
+        self._SORT_LABEL_TO_KEY = {
+            t("common.action.name"): "name",
+            t("common.action.date"): "date",
+            t("common.action.status"): "status",
+        }
         view_bar = ttk.Frame(sel_outer)
         view_bar.pack(fill="x", padx=6, pady=(6, 2))
-        ttk.Label(view_bar, text="Sort by:").pack(side="left")
-        self._sort_var = tk.StringVar(value="Name")
+        ttk.Label(view_bar, text=t("common.action.sort_by")).pack(side="left")
+        self._sort_var = tk.StringVar(value=t("common.action.name"))
         sort_combo = ttk.Combobox(
             view_bar, textvariable=self._sort_var, state="readonly", width=10,
-            values=("Name", "Date", "Status"),
+            values=tuple(self._SORT_LABEL_TO_KEY),
         )
         sort_combo.pack(side="left", padx=(4, 6))
         sort_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_view())
 
         self._sort_desc_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            view_bar, text="Descending", variable=self._sort_desc_var,
+            view_bar, text=t("common.action.descending"), variable=self._sort_desc_var,
             command=self._apply_view,
         ).pack(side="left", padx=(0, 12))
 
         self._hide_synced_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            view_bar, text="Hide already-synced", variable=self._hide_synced_var,
+            view_bar, text=t("common.action.hide_synced"), variable=self._hide_synced_var,
             command=self._apply_view,
         ).pack(side="left")
 
@@ -627,9 +644,9 @@ class App(tk.Tk):
             tab = ttk.Frame(self._notebook)
             hdr = ttk.Frame(tab)
             hdr.pack(fill="x", padx=2, pady=(4, 2))
-            ttk.Button(hdr, text="Select all",  command=all_cmd).pack(side="right", padx=(4, 0))
-            ttk.Button(hdr, text="Select none", command=none_cmd).pack(side="right")
-            ttk.Label(hdr, text="Click a row to toggle ·  click a header to sort",
+            ttk.Button(hdr, text=t("common.action.select_all"),  command=all_cmd).pack(side="right", padx=(4, 0))
+            ttk.Button(hdr, text=t("common.action.select_none"), command=none_cmd).pack(side="right")
+            ttk.Label(hdr, text=t("gui.click_row_hint"),
                       style="Muted.TLabel").pack(side="left")
             tree = CheckTree(tab)
             return tab, tree
@@ -638,12 +655,12 @@ class App(tk.Tk):
             lambda: self._arch_tree.set_all(True), lambda: self._arch_tree.set_all(False))
         lib_tab, self._lib_tree = _make_tab(
             lambda: self._lib_tree.set_all(True), lambda: self._lib_tree.set_all(False))
-        self._notebook.add(arch_tab, text="Archives")
-        self._notebook.add(lib_tab,  text="Library files")
+        self._notebook.add(arch_tab, text=t("common.action.archives_tab"))
+        self._notebook.add(lib_tab,  text=t("common.action.library_tab"))
         self._arch_tab, self._lib_tab = arch_tab, lib_tab
 
         # ── Log pane ──────────────────────────────────────────────────────────
-        log_frame = ttk.LabelFrame(paned, text="Output")
+        log_frame = ttk.LabelFrame(paned, text=t("gui.output_frame"))
         paned.add(log_frame, weight=2)
 
         mono = font.Font(family="Menlo", size=10)
@@ -672,7 +689,7 @@ class App(tk.Tk):
         path = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*")],
-            title="Choose sync state file",
+            title=t("gui.browse_dialog_title"),
         )
         if path:
             self._vars["sync_state_file"].set(path)
@@ -714,14 +731,14 @@ class App(tk.Tk):
         cfg = self._collect_fields()
         missing = []
         if not cfg["bambuddy_api_key"]:
-            missing.append("Bambuddy API key")
+            missing.append(t("common.field.bambuddy_api_key"))
         # Need EITHER client ID + secret OR a pre-issued token.
         has_client_creds = bool(cfg["manyfold_client_id"] and cfg["manyfold_client_secret"])
         if not has_client_creds and not cfg["manyfold_token"]:
-            missing.append("Manyfold client ID + secret (or a token)")
+            missing.append(t("common.field.missing_client_creds_or_token"))
         if missing:
             messagebox.showerror(
-                "Missing config", "Please fill in:\n• " + "\n• ".join(missing)
+                t("gui.missing_config_title"), t("gui.missing_config_message", fields="\n• ".join(missing))
             )
             return None
         save_gui_config(cfg)
@@ -774,7 +791,7 @@ class App(tk.Tk):
             import requests as _requests
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"\n{'─' * 60}")
-            print(f"  ⟳  Loading models at {ts}")
+            print(f"  ⟳  {t('log.loading_models_banner')} at {ts}")
             print(f"{'─' * 60}\n")
 
             session = _requests.Session()
@@ -801,13 +818,13 @@ class App(tk.Tk):
                 folder_path = folder_by_id[folder_id]["_full_path"] if folder_id in folder_by_id else None
                 lf["_display_name"] = f"{folder_path}/{stem}" if folder_path else stem
 
-            print(f"\n  ℹ️  Loaded {len(archives)} archive(s) and {len(lib_files)} library file(s).\n")
+            print(f"\n  ℹ️  {t('log.loaded_summary', archives=len(archives), files=len(lib_files))}\n")
 
         except SystemExit as e:
             if str(e) != "0":
-                print(f"\n❌ Aborted (exit code {e})\n")
+                print(f"\n❌ {t('log.aborted', code=e)}\n")
         except Exception as e:
-            print(f"\n❌ Error loading models: {e}\n")
+            print(f"\n❌ {t('log.error_loading_models', error=e)}\n")
         finally:
             sys.stdout = old_out
             sys.stderr = old_err
@@ -851,7 +868,7 @@ class App(tk.Tk):
 
         arch_synced = sum(1 for a in archives if a.get("id") in synced_archive_ids)
         self._notebook.tab(self._arch_tab,
-                           text=f"Archives  ({len(archives)} · {arch_synced} synced)")
+                           text=t("gui.archives_tab_counted", total=len(archives), synced=arch_synced))
 
         # Populate library files tree (supported extensions only)
         supported_extensions = {".3mf", ".stl", ".obj", ".step", ".stp"}
@@ -871,7 +888,7 @@ class App(tk.Tk):
 
         lib_synced = sum(1 for lf in supported if lf.get("id") in synced_file_ids)
         self._notebook.tab(self._lib_tab,
-                           text=f"Library files  ({len(supported)} · {lib_synced} synced)")
+                           text=t("gui.library_tab_counted", total=len(supported), synced=lib_synced))
 
         # Apply the current sort/filter and render both trees.
         self._apply_view()
@@ -881,7 +898,7 @@ class App(tk.Tk):
 
     def _apply_view(self):
         """Push the current sort key / direction / hide-synced setting to both lists."""
-        key = {"Name": "name", "Date": "date", "Status": "status"}.get(self._sort_var.get(), "name")
+        key = self._SORT_LABEL_TO_KEY.get(self._sort_var.get(), "name")
         reverse = self._sort_desc_var.get()
         hide = self._hide_synced_var.get()
         for tree in (self._arch_tree, self._lib_tree):
@@ -894,7 +911,7 @@ class App(tk.Tk):
 
     def _start_sync(self):
         if not self._archives and not self._lib_files:
-            messagebox.showinfo("No models", "Click 'Load models' first.")
+            messagebox.showinfo(t("gui.no_models_title"), t("gui.no_models_message"))
             return
 
         cfg = self._validate_config()
@@ -905,7 +922,7 @@ class App(tk.Tk):
         selected_file_ids    = {int(iid) for iid in self._lib_tree.checked_iids()}
 
         if not selected_archive_ids and not selected_file_ids:
-            messagebox.showinfo("Nothing selected", "Select at least one model to sync.")
+            messagebox.showinfo(t("gui.nothing_selected_title"), t("gui.nothing_selected_message"))
             return
 
         dry_run = self._dry_run_var.get()
@@ -931,7 +948,7 @@ class App(tk.Tk):
 
     def _request_stop(self):
         self._running = False
-        self._append_log("\n⚠️  Stop requested — will halt after the current file.\n")
+        self._append_log(f"\n⚠️  {t('log.stop_requested')}\n")
 
     def _sync_done(self):
         self._running = False
@@ -943,7 +960,7 @@ class App(tk.Tk):
         # Auto-reload so the lists reflect the new synced statuses.
         if getattr(self, "_reload_after_sync", False):
             self._reload_after_sync = False
-            self._append_log("\n🔄 Reloading models to refresh statuses…\n")
+            self._append_log(f"\n🔄 {t('log.reloading_models')}\n")
             self.after(500, self._start_load)
 
     # ── Cleanup: delete empty models ──────────────────────────────────────────
@@ -954,9 +971,8 @@ class App(tk.Tk):
             return
 
         collection = simpledialog.askstring(
-            "Clean up empty models",
-            "Delete models that have NO files in this collection.\n\n"
-            "Collection name (or 'ALL' for every collection):",
+            t("gui.cleanup_dialog_title"),
+            t("gui.cleanup_dialog_prompt"),
             initialvalue="MakerWorld",
             parent=self,
         )
@@ -965,17 +981,16 @@ class App(tk.Tk):
         collection = collection.strip()
 
         dry_run = self._dry_run_var.get()
-        scope = "ALL collections" if collection.upper() == "ALL" else f"collection '{collection}'"
+        scope = t("gui.all_collections") if collection.upper() == "ALL" else t("gui.collection_named", collection=collection)
         if not dry_run:
             if not messagebox.askyesno(
-                "Confirm deletion",
-                f"This will permanently DELETE every model in {scope} that has no "
-                f"files.\n\nThis cannot be undone. Continue?",
+                t("gui.confirm_deletion_title"),
+                t("gui.confirm_deletion_message", scope=scope),
                 icon="warning", parent=self,
             ):
                 return
         else:
-            self._append_log(f"\n🧹 Dry run — listing empty models in {scope} (nothing deleted).\n")
+            self._append_log(f"\n🧹 {t('gui.dry_run_listing', scope=scope)}\n")
 
         self._running = True
         self._load_btn.configure(state="disabled")
@@ -1002,8 +1017,9 @@ class App(tk.Tk):
             import datetime
             import requests as _requests
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            tag = f"  [{t('log.dry_run_tag')}]" if dry_run else ""
             print(f"\n{'─' * 60}")
-            print(f"  🧹  Cleanup started at {ts}" + ("  [DRY RUN]" if dry_run else ""))
+            print(f"  🧹  {t('log.cleanup_started_banner')} at {ts}{tag}")
             print(f"{'─' * 60}\n")
 
             session = _requests.Session()
@@ -1012,14 +1028,14 @@ class App(tk.Tk):
             if "delete" not in scopes.split():
                 scopes = f"{scopes} delete"
             if not sync_mod.obtain_manyfold_token(session, scopes=scopes):
-                print("❌ Could not obtain a delete-capable token.")
+                print(f"❌ {t('log.could_not_obtain_token')}")
             else:
                 target = None if collection.upper() == "ALL" else collection
                 deleted = sync_mod.cleanup_empty_models(session, target, dry_run)
-                print(f"\n✅ Cleanup complete — {deleted} empty model(s) "
-                      f"{'would be ' if dry_run else ''}deleted.")
+                key = "log.cleanup_complete_dry_run" if dry_run else "log.cleanup_complete"
+                print(f"\n✅ {t(key, deleted=deleted)}")
         except Exception as e:
-            print(f"\n❌ Cleanup error: {e}\n")
+            print(f"\n❌ {t('log.cleanup_error', error=e)}\n")
         finally:
             sys.stdout = old_out
             sys.stderr = old_err
@@ -1062,8 +1078,9 @@ class App(tk.Tk):
 
             import datetime
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            tag = f"  [{t('log.dry_run_tag')}]" if dry_run else ""
             print(f"\n{'─' * 60}")
-            print(f"  🚀  Sync started at {ts}" + ("  [DRY RUN]" if dry_run else ""))
+            print(f"  🚀  {t('log.sync_started_banner')} at {ts}{tag}")
             print(f"{'─' * 60}\n")
 
             session = _requests.Session()
@@ -1071,7 +1088,7 @@ class App(tk.Tk):
 
             state          = sync_mod.load_sync_state()
             existing_names = sync_mod.get_existing_manyfold_models(session)
-            print(f"  ℹ️  {len(existing_names)} existing models found in Manyfold.\n")
+            print(f"  ℹ️  {t('log.existing_models_found', count=len(existing_names))}\n")
 
             start = time.time()
             archives_added = sync_mod.sync_archives(
@@ -1082,7 +1099,7 @@ class App(tk.Tk):
             )
 
             if not self._running:
-                print("\n⚠️  Stopped before library sync.\n")
+                print(f"\n⚠️  {t('log.stopped_before_library')}\n")
             else:
                 library_added = sync_mod.sync_library_files(
                     session, state, existing_names, dry_run,
@@ -1098,17 +1115,17 @@ class App(tk.Tk):
                     sync_mod.save_sync_state(state)
 
                 elapsed = time.time() - start
-                print(f"\n✅ Sync complete in {elapsed:.1f}s")
-                print(f"   Archives uploaded     : {archives_added}")
-                print(f"   Library files uploaded: {library_added}")
+                print(f"\n✅ {t('log.sync_complete', elapsed=f'{elapsed:.1f}')}")
+                print(f"   {t('log.archives_uploaded')}     : {archives_added}")
+                print(f"   {t('log.library_files_uploaded')}: {library_added}")
                 if dry_run:
-                    print("   (dry-run — no changes were made)")
+                    print(f"   {t('log.dry_run_no_changes')}")
 
         except SystemExit as e:
             if str(e) != "0":
-                print(f"\n❌ Aborted (exit code {e})\n")
+                print(f"\n❌ {t('log.aborted', code=e)}\n")
         except Exception as e:
-            print(f"\n❌ Unexpected error: {e}\n")
+            print(f"\n❌ {t('log.unexpected_error', error=e)}\n")
         finally:
             sys.stdout = old_out
             sys.stderr = old_err
