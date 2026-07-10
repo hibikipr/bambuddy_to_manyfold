@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # App code — the CLI engine is imported unmodified by the web app and by
 # bambuddy_to_manyfold.py's own __main__ block if you exec into the container.
-COPY bambuddy_to_manyfold.py bambuddy_manyfold_web.py ./
+COPY bambuddy_to_manyfold.py bambuddy_manyfold_web.py i18n.py ./
 COPY templates ./templates
 COPY static ./static
 

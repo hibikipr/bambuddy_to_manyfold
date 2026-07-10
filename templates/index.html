@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ lang }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Bambuddy → Manyfold Sync</title>
+<title>{{ t('common.title') }}</title>
 <!-- PWA -->
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#00ae42">
@@ -109,131 +109,131 @@
 </style>
 </head>
 <body>
-<div id="ptr"><span id="ptrIcon">↓</span><span id="ptrText">Pull to refresh</span></div>
+<div id="ptr"><span id="ptrIcon">↓</span><span id="ptrText">{{ t('web.ptr.pull') }}</span></div>
 <header>
   <svg class="cube" viewBox="0 0 64 64" aria-hidden="true">
     <polygon points="32,8 8,22 32,36 56,22" fill="#00c64d"/>
     <polygon points="8,22 8,46 32,60 32,36" fill="#00ae42"/>
     <polygon points="56,22 56,46 32,60 32,36" fill="#009438"/>
   </svg>
-  <h1>Bambuddy → Manyfold Sync</h1>
+  <h1>{{ t('common.title') }}</h1>
 </header>
 
 <main>
   <!-- Config -->
   <div class="card">
-    <h2>Configuration</h2>
+    <h2>{{ t('web.config_heading') }}</h2>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-      <div class="muted" style="flex:1"><span id="dot" class="status-dot" style="background:#888"></span><span id="health">Checking connections…</span></div>
+      <div class="muted" style="flex:1"><span id="dot" class="status-dot" style="background:#888"></span><span id="health">{{ t('web.checking_connections') }}</span></div>
     </div>
 
-    <label>Bambuddy URL</label>
+    <label>{{ t('common.field.bambuddy_url') }}</label>
     <input id="cfg_bambuddy_url" placeholder="http://localhost:8000">
 
-    <label>Bambuddy API key</label>
+    <label>{{ t('common.field.bambuddy_api_key') }}</label>
     <div class="field-with-toggle">
       <input id="cfg_bambuddy_api_key" type="password">
-      <label class="show-toggle"><input type="checkbox" data-reveal="cfg_bambuddy_api_key"> Show</label>
+      <label class="show-toggle"><input type="checkbox" data-reveal="cfg_bambuddy_api_key"> {{ t('common.field.show') }}</label>
     </div>
 
-    <label>Manyfold URL</label>
+    <label>{{ t('common.field.manyfold_url') }}</label>
     <input id="cfg_manyfold_url" placeholder="http://localhost:3214">
 
     <div class="row">
       <div>
-        <label>Manyfold client ID</label>
+        <label>{{ t('common.field.manyfold_client_id') }}</label>
         <div class="field-with-toggle">
           <input id="cfg_manyfold_client_id" type="password">
-          <label class="show-toggle"><input type="checkbox" data-reveal="cfg_manyfold_client_id"> Show</label>
+          <label class="show-toggle"><input type="checkbox" data-reveal="cfg_manyfold_client_id"> {{ t('common.field.show') }}</label>
         </div>
       </div>
       <div>
-        <label>Manyfold client secret</label>
+        <label>{{ t('common.field.manyfold_client_secret') }}</label>
         <div class="field-with-toggle">
           <input id="cfg_manyfold_client_secret" type="password">
-          <label class="show-toggle"><input type="checkbox" data-reveal="cfg_manyfold_client_secret"> Show</label>
+          <label class="show-toggle"><input type="checkbox" data-reveal="cfg_manyfold_client_secret"> {{ t('common.field.show') }}</label>
         </div>
       </div>
     </div>
 
-    <label>Manyfold token (alt — used only if client ID/secret are blank)</label>
+    <label>{{ t('web.manyfold_token') }}</label>
     <div class="field-with-toggle">
       <input id="cfg_manyfold_token" type="password">
-      <label class="show-toggle"><input type="checkbox" data-reveal="cfg_manyfold_token"> Show</label>
+      <label class="show-toggle"><input type="checkbox" data-reveal="cfg_manyfold_token"> {{ t('common.field.show') }}</label>
     </div>
 
     <div class="row">
       <div>
-        <label>Manyfold library ID</label>
+        <label>{{ t('common.field.manyfold_library_id') }}</label>
         <input id="cfg_manyfold_library_id">
       </div>
       <div>
-        <label>Sync state file</label>
+        <label>{{ t('common.field.sync_state_file') }}</label>
         <input id="cfg_sync_state_file">
       </div>
     </div>
 
-    <button id="saveConfigBtn" class="btn-primary full" style="margin-top:14px">Save config</button>
+    <button id="saveConfigBtn" class="btn-primary full" style="margin-top:14px">{{ t('web.save_config') }}</button>
   </div>
 
   <!-- Options + actions -->
   <div class="card">
-    <h2>Sync options</h2>
+    <h2>{{ t('web.sync_options_heading') }}</h2>
     <div class="options-bar">
-      <label class="opt"><input type="checkbox" id="opt_dry_run"> Dry run (no uploads)</label>
-      <label class="opt"><input type="checkbox" id="opt_create_missing" checked> Create missing models</label>
-      <label class="opt"><input type="checkbox" id="opt_force"> Force re-sync</label>
-      <label class="opt"><input type="checkbox" id="opt_add_links" checked> Add MakerWorld links</label>
-      <label class="opt"><input type="checkbox" id="opt_enrich" checked> Fetch MakerWorld details</label>
-      <label class="opt"><input type="checkbox" id="opt_group" checked> Group MakerWorld profiles</label>
-      <label class="opt"><input type="checkbox" id="opt_debug"> Log debug</label>
+      <label class="opt"><input type="checkbox" id="opt_dry_run"> {{ t('common.option.dry_run') }}</label>
+      <label class="opt"><input type="checkbox" id="opt_create_missing" checked> {{ t('web.opt_create_missing') }}</label>
+      <label class="opt"><input type="checkbox" id="opt_force"> {{ t('web.opt_force') }}</label>
+      <label class="opt"><input type="checkbox" id="opt_add_links" checked> {{ t('common.option.add_links') }}</label>
+      <label class="opt"><input type="checkbox" id="opt_enrich" checked> {{ t('web.opt_enrich') }}</label>
+      <label class="opt"><input type="checkbox" id="opt_group" checked> {{ t('web.opt_group') }}</label>
+      <label class="opt"><input type="checkbox" id="opt_debug"> {{ t('common.option.debug') }}</label>
     </div>
     <div class="actions-bar">
-      <button id="loadBtn" class="btn-primary">⟳ Load models</button>
-      <button id="runBtn" class="btn-primary" disabled>▶ Run sync</button>
-      <button id="stopBtn" class="btn-danger" disabled>⬛ Stop</button>
-      <button id="cleanupBtn" class="btn-secondary">🧹 Clean empty models</button>
+      <button id="loadBtn" class="btn-primary">{{ t('web.load_models_button') }}</button>
+      <button id="runBtn" class="btn-primary" disabled>{{ t('web.run_sync_button') }}</button>
+      <button id="stopBtn" class="btn-danger" disabled>{{ t('web.stop_button') }}</button>
+      <button id="cleanupBtn" class="btn-secondary">{{ t('web.cleanup_button') }}</button>
     </div>
     <div id="progress" class="progress"><div class="progress-bar"></div></div>
   </div>
 
   <!-- Model selection -->
   <div class="card">
-    <h2>Model selection — click a row to toggle, or a column header to sort</h2>
+    <h2>{{ t('web.model_selection_heading') }}</h2>
     <div class="list-toolbar">
-      <span>Sort by:</span>
-      <select id="sortKey"><option value="name">Name</option><option value="date">Date</option><option value="status">Status</option></select>
-      <label class="opt"><input type="checkbox" id="sortDesc"> Descending</label>
-      <label class="opt"><input type="checkbox" id="hideSynced"> Hide already-synced</label>
+      <span>{{ t('common.action.sort_by') }}</span>
+      <select id="sortKey"><option value="name">{{ t('common.action.name') }}</option><option value="date">{{ t('common.action.date') }}</option><option value="status">{{ t('common.action.status') }}</option></select>
+      <label class="opt"><input type="checkbox" id="sortDesc"> {{ t('common.action.descending') }}</label>
+      <label class="opt"><input type="checkbox" id="hideSynced"> {{ t('common.action.hide_synced') }}</label>
       <span class="spacer"></span>
     </div>
     <div class="tabs">
-      <button class="tab-btn active" data-tab="archives">Archives (<span id="archCount">0</span>)</button>
-      <button class="tab-btn" data-tab="library">Library files (<span id="libCount">0</span>)</button>
+      <button class="tab-btn active" data-tab="archives">{{ t('common.action.archives_tab') }} (<span id="archCount">0</span>)</button>
+      <button class="tab-btn" data-tab="library">{{ t('common.action.library_tab') }} (<span id="libCount">0</span>)</button>
     </div>
     <div class="tab-panel active" data-tab="archives">
       <div class="list-toolbar">
-        <button id="archAll" class="btn-secondary">Select all</button>
-        <button id="archNone" class="btn-secondary">Select none</button>
+        <button id="archAll" class="btn-secondary">{{ t('common.action.select_all') }}</button>
+        <button id="archNone" class="btn-secondary">{{ t('common.action.select_none') }}</button>
       </div>
       <div class="model-head" data-list="archives">
         <span style="flex:0 0 18px"></span>
-        <span class="name" data-key="name">Name</span>
-        <span class="date" data-key="date">Date</span>
-        <span class="status" data-key="status">Status</span>
+        <span class="name" data-key="name">{{ t('common.action.name') }}</span>
+        <span class="date" data-key="date">{{ t('common.action.date') }}</span>
+        <span class="status" data-key="status">{{ t('common.action.status') }}</span>
       </div>
       <div id="archList" class="model-list"></div>
     </div>
     <div class="tab-panel" data-tab="library">
       <div class="list-toolbar">
-        <button id="libAll" class="btn-secondary">Select all</button>
-        <button id="libNone" class="btn-secondary">Select none</button>
+        <button id="libAll" class="btn-secondary">{{ t('common.action.select_all') }}</button>
+        <button id="libNone" class="btn-secondary">{{ t('common.action.select_none') }}</button>
       </div>
       <div class="model-head" data-list="library">
         <span style="flex:0 0 18px"></span>
-        <span class="name" data-key="name">Name</span>
-        <span class="date" data-key="date">Date</span>
-        <span class="status" data-key="status">Status</span>
+        <span class="name" data-key="name">{{ t('common.action.name') }}</span>
+        <span class="date" data-key="date">{{ t('common.action.date') }}</span>
+        <span class="status" data-key="status">{{ t('common.action.status') }}</span>
       </div>
       <div id="libList" class="model-list"></div>
     </div>
@@ -242,18 +242,35 @@
   <!-- Log -->
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between">
-      <h2 style="margin:0">Output</h2>
-      <button id="clearLogBtn" class="btn-secondary" style="width:auto;padding:6px 10px;font-size:12px">Clear log</button>
+      <h2 style="margin:0">{{ t('web.output_heading') }}</h2>
+      <button id="clearLogBtn" class="btn-secondary" style="width:auto;padding:6px 10px;font-size:12px">{{ t('common.action.clear_log') }}</button>
     </div>
     <div id="log" class="log-pane" style="margin-top:8px"></div>
   </div>
 </main>
 
 <footer style="max-width:900px;margin:0 auto;text-align:center;color:var(--muted);font-size:11px;padding:0 16px calc(16px + env(safe-area-inset-bottom))">
-  Bambuddy → Manyfold Sync {{ version }}
+  {{ t('common.title') }} {{ version }}
 </footer>
 
 <script>
+// Active-language translation dict, embedded server-side (see
+// bambuddy_manyfold_web.py's index() route) so the in-browser JS doesn't
+// need a second round trip or its own copy of the strings. Mirrors the
+// Python i18n.get_translation() lookup: dot-separated key path,
+// "{name}"-style interpolation, with an _plural-suffixed key for the
+// count!=1 case (same convention Bambuddy's frontend i18next config uses).
+const I18N_LANG = {{ lang|tojson }};
+const I18N = {{ translations|tojson }};
+function t(key, vars){
+  const parts = key.split('.');
+  let v = I18N;
+  for(const p of parts){ v = (v && typeof v==='object') ? v[p] : undefined; }
+  if(typeof v !== 'string') return key;
+  if(vars) for(const k in vars) v = v.split('{'+k+'}').join(String(vars[k]));
+  return v;
+}
+
 const $ = id => document.getElementById(id);
 
 // Register the service worker (enables installable PWA). Needs https or localhost.
@@ -282,7 +299,7 @@ if('serviceWorker' in navigator && window.isSecureContext){
       ptr.style.transform = 'translateY('+(off-H)+'px)';
       const past = pull>=TRIGGER;
       icon.style.transform = past ? 'rotate(180deg)' : 'rotate(0deg)';
-      txt.textContent = past ? 'Release to refresh' : 'Pull to refresh';
+      txt.textContent = past ? t('web.ptr.release') : t('web.ptr.pull');
     } else { active=false; }
   }, {passive:false});
 
@@ -291,7 +308,7 @@ if('serviceWorker' in navigator && window.isSecureContext){
     ptr.style.transition='transform .25s';
     if(pull>=TRIGGER){
       ptr.style.transform='translateY(0)';
-      txt.textContent='Refreshing…'; icon.textContent='↻';
+      txt.textContent=t('web.ptr.refreshing'); icon.textContent='↻';
       icon.style.animation='ptrspin .8s linear infinite';
       setTimeout(()=>location.reload(), 350);
     } else {
@@ -302,9 +319,9 @@ if('serviceWorker' in navigator && window.isSecureContext){
 })();
 
 function toast(msg, ok=true){
-  const t=document.createElement('div');
-  t.className='toast '+(ok?'ok':'err'); t.textContent=msg;
-  document.body.appendChild(t); setTimeout(()=>t.remove(), 3500);
+  const el=document.createElement('div');
+  el.className='toast '+(ok?'ok':'err'); el.textContent=msg;
+  document.body.appendChild(el); setTimeout(()=>el.remove(), 3500);
 }
 
 // ── Config ──
@@ -340,9 +357,9 @@ $('saveConfigBtn').onclick = async () => {
   try{
     const r = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const d = await r.json();
-    if(d.ok){ toast('Config saved'); checkHealth(); }
-    else { toast('Missing: '+(d.missing||[]).join(', '), false); }
-  }catch(e){ toast('Save failed', false); }
+    if(d.ok){ toast(t('web.config_saved')); checkHealth(); }
+    else { toast(t('web.missing_prefix',{fields:(d.missing||[]).join(', ')}), false); }
+  }catch(e){ toast(t('web.save_failed'), false); }
 };
 
 async function checkHealth(){
@@ -350,12 +367,12 @@ async function checkHealth(){
     const d = await (await fetch('/api/health')).json();
     if(d.ok){
       $('dot').style.background = 'var(--green)';
-      $('health').textContent = 'Connected — '+d.bambuddy_url+' → '+d.manyfold_url;
+      $('health').textContent = t('web.connected',{bambuddy_url:d.bambuddy_url, manyfold_url:d.manyfold_url});
     } else {
       $('dot').style.background = 'var(--danger)';
-      $('health').textContent = d.error || 'Not connected';
+      $('health').textContent = d.error || t('web.not_connected');
     }
-  }catch(e){ $('health').textContent = 'Server error'; }
+  }catch(e){ $('health').textContent = t('web.server_error'); }
 }
 
 // ── Model lists (mirrors the Tkinter CheckTree: data model + sort/filter render) ──
@@ -408,8 +425,8 @@ function escapeHtml(s){
 function renderAll(){
   renderList($('archList'), archiveRows);
   renderList($('libList'), libraryRows);
-  $('archCount').textContent = archiveRows.length + ' · ' + archiveRows.filter(r=>r.status==='synced').length + ' synced';
-  $('libCount').textContent = libraryRows.length + ' · ' + libraryRows.filter(r=>r.status==='synced').length + ' synced';
+  $('archCount').textContent = t('web.synced_count',{total:archiveRows.length, synced:archiveRows.filter(r=>r.status==='synced').length});
+  $('libCount').textContent = t('web.synced_count',{total:libraryRows.length, synced:libraryRows.filter(r=>r.status==='synced').length});
 }
 
 $('sortKey').onchange = () => { sortKey = $('sortKey').value; renderAll(); };
@@ -500,13 +517,13 @@ function onJobDone(kind, payload){
     if(result.archives || result.library_files) applyModels(result);
     else fetchModels();
   } else if(kind === 'sync'){
-    toast('Sync complete — '+(result.archives_added||0)+' archive(s), '+(result.library_added||0)+' file(s)');
+    toast(t('web.sync_complete_toast',{archives:result.archives_added||0, files:result.library_added||0}));
     if(!result.dry_run){
       // Refresh statuses, mirroring the Tkinter GUI's auto-reload after a real sync.
       setTimeout(startLoad, 500);
     }
   } else if(kind === 'cleanup'){
-    toast('Cleanup complete — '+(result.deleted||0)+' empty model(s) removed');
+    toast(t('web.cleanup_complete_toast',{deleted:result.deleted||0}));
   }
 }
 
@@ -519,19 +536,19 @@ async function startLoad(){
   try{
     const r = await fetch('/api/models/load', {method:'POST'});
     const d = await r.json();
-    if(!d.ok){ toast(d.error || 'Could not start load', false); return; }
+    if(!d.ok){ toast(d.error || t('web.could_not_start_load'), false); return; }
     currentJobKind = 'load';
     setRunningUI(true);
     openStream();
-  }catch(e){ toast('Load failed', false); }
+  }catch(e){ toast(t('web.load_failed'), false); }
 }
 $('loadBtn').onclick = startLoad;
 
 $('runBtn').onclick = async () => {
-  if(!archiveRows.length && !libraryRows.length){ toast('Click "Load models" first', false); return; }
+  if(!archiveRows.length && !libraryRows.length){ toast(t('web.click_load_first'), false); return; }
   const selectedArchiveIds = archiveRows.filter(r=>r.checked).map(r=>r.id);
   const selectedLibraryIds = libraryRows.filter(r=>r.checked).map(r=>r.id);
-  if(!selectedArchiveIds.length && !selectedLibraryIds.length){ toast('Select at least one model', false); return; }
+  if(!selectedArchiveIds.length && !selectedLibraryIds.length){ toast(t('web.select_at_least_one'), false); return; }
   const body = {
     dry_run: $('opt_dry_run').checked,
     create_missing: $('opt_create_missing').checked,
@@ -545,34 +562,34 @@ $('runBtn').onclick = async () => {
   try{
     const r = await fetch('/api/sync/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const d = await r.json();
-    if(!d.ok){ toast(d.error || 'Could not start sync', false); return; }
+    if(!d.ok){ toast(d.error || t('web.could_not_start_sync'), false); return; }
     currentJobKind = 'sync';
     setRunningUI(true);
     openStream();
-  }catch(e){ toast('Sync failed to start', false); }
+  }catch(e){ toast(t('web.sync_failed_to_start'), false); }
 };
 
 $('stopBtn').onclick = async () => {
-  try{ await fetch('/api/sync/cancel', {method:'POST'}); appendLog('\n⚠️  Stop requested…\n'); }
+  try{ await fetch('/api/sync/cancel', {method:'POST'}); appendLog('\n⚠️  '+t('web.stop_requested_toast')+'\n'); }
   catch(e){}
 };
 
 $('cleanupBtn').onclick = async () => {
-  const collection = prompt('Delete models with NO files in this collection.\n\nCollection name (or "ALL" for every collection):', 'MakerWorld');
+  const collection = prompt(t('web.cleanup_prompt'), 'MakerWorld');
   if(collection === null) return;
   const dryRun = $('opt_dry_run').checked;
   if(!dryRun){
-    if(!confirm('This will permanently DELETE every model in "'+collection+'" that has no files. This cannot be undone. Continue?')) return;
+    if(!confirm(t('web.cleanup_confirm',{collection}))) return;
   }
   try{
     const r = await fetch('/api/cleanup/start', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({collection: collection.trim(), dry_run: dryRun})});
     const d = await r.json();
-    if(!d.ok){ toast(d.error || 'Could not start cleanup', false); return; }
+    if(!d.ok){ toast(d.error || t('web.could_not_start_cleanup'), false); return; }
     currentJobKind = 'cleanup';
     setRunningUI(true);
     openStream();
-  }catch(e){ toast('Cleanup failed to start', false); }
+  }catch(e){ toast(t('web.cleanup_failed_to_start'), false); }
 };
 
 // ── Init ──

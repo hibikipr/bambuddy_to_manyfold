@@ -42,7 +42,9 @@ import uuid
 from pathlib import Path
 
 import requests
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, make_response, render_template, request
+
+import i18n
 
 logging.basicConfig(
     level=logging.INFO,
@@ -170,7 +172,7 @@ class SyncJob:
     """Tracks one load/sync/cleanup run: status, an append-only log buffer that
     new SSE subscribers replay from the start, and live subscriber queues."""
 
-    def __init__(self, kind: str, options: dict | None = None):
+    def __init__(self, kind: str, options: dict | None = None, lang: str = i18n.DEFAULT_LANG):
         self.id = uuid.uuid4().hex
         self.kind = kind  # "load" | "sync" | "cleanup"
         self.options = options or {}
@@ -182,6 +184,11 @@ class SyncJob:
         self.result: dict | None = None
         self.cancel_requested = False
         self._lock = threading.Lock()
+        # Resolved once from the request that started this job (see
+        # _resolve_request_locale) — the print()-based log this job emits is
+        # shared state (an SSE broadcast every subscriber sees identically),
+        # so the language is fixed per-job, not re-resolved per-viewer.
+        self.t = i18n.Translator(lang).t
 
     def emit(self, text: str):
         if not text:
@@ -228,7 +235,7 @@ _current_job: SyncJob | None = None
 _last_models: dict | None = None  # {"archives": [...], "library_files": [...]} from the last load job
 
 
-def _try_start_job(kind: str, options: dict, target) -> SyncJob | None:
+def _try_start_job(kind: str, options: dict, target, lang: str = i18n.DEFAULT_LANG) -> SyncJob | None:
     """Start a job in a background thread if none is currently running.
 
     Returns the new SyncJob, or None (caller should respond 409) if a job is
@@ -239,7 +246,7 @@ def _try_start_job(kind: str, options: dict, target) -> SyncJob | None:
     if not _job_run_lock.acquire(blocking=False):
         return None
 
-    job = SyncJob(kind, options)
+    job = SyncJob(kind, options, lang=lang)
     _current_job = job
 
     def _runner():
@@ -250,12 +257,12 @@ def _try_start_job(kind: str, options: dict, target) -> SyncJob | None:
             target(job)
         except SystemExit as e:
             if str(e) != "0":
-                job.emit(f"\n❌ Aborted (exit code {e})\n")
+                job.emit(f"\n❌ {job.t('log.aborted', code=e)}\n")
                 job.finish("error")
             else:
                 job.finish("done")
         except Exception as e:
-            job.emit(f"\n❌ Unexpected error: {e}\n")
+            job.emit(f"\n❌ {job.t('log.unexpected_error', error=e)}\n")
             job.finish("error")
         else:
             if job.status == "running":
@@ -268,10 +275,11 @@ def _try_start_job(kind: str, options: dict, target) -> SyncJob | None:
     return job
 
 
-def _banner(emoji: str, label: str, dry_run: bool = False):
+def _banner(emoji: str, label_key: str, t, dry_run: bool = False):
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    tag = f"  [{t('log.dry_run_tag')}]" if dry_run else ""
     print(f"\n{'─' * 60}")
-    print(f"  {emoji}  {label} at {ts}" + ("  [DRY RUN]" if dry_run else ""))
+    print(f"  {emoji}  {t(label_key)} at {ts}{tag}")
     print(f"{'─' * 60}\n")
 
 
@@ -293,7 +301,7 @@ def _run_load(job: SyncJob):
     sync_mod = _load_sync_module()
     session = requests.Session()
 
-    _banner("⟳", "Loading models")
+    _banner("⟳", "log.loading_models_banner", job.t)
     sync_mod.check_connections(session)
 
     state = sync_mod.load_sync_state()
@@ -335,7 +343,7 @@ def _run_load(job: SyncJob):
             "date": lf.get("created_at") or lf.get("created") or "",
         })
 
-    print(f"\n  ℹ️  Loaded {len(archive_rows)} archive(s) and {len(lib_rows)} library file(s).\n")
+    print(f"\n  ℹ️  {job.t('log.loaded_summary', archives=len(archive_rows), files=len(lib_rows))}\n")
 
     job.result = {"archives": archive_rows, "library_files": lib_rows}
     _last_models = job.result
@@ -353,12 +361,12 @@ def _run_sync(job: SyncJob, options: dict):
         set(selected_library_file_ids) if selected_library_file_ids is not None else None
     )
 
-    _banner("🚀", "Sync started", dry_run)
+    _banner("🚀", "log.sync_started_banner", job.t, dry_run)
     sync_mod.check_connections(session)
 
     state = sync_mod.load_sync_state()
     existing_names = sync_mod.get_existing_manyfold_models(session)
-    print(f"  ℹ️  {len(existing_names)} existing models found in Manyfold.\n")
+    print(f"  ℹ️  {job.t('log.existing_models_found', count=len(existing_names))}\n")
 
     start = time.time()
     archives_added = sync_mod.sync_archives(
@@ -370,7 +378,7 @@ def _run_sync(job: SyncJob, options: dict):
 
     library_added = 0
     if job.cancel_requested:
-        print("\n⚠️  Stopped before library sync.\n")
+        print(f"\n⚠️  {job.t('log.stopped_before_library')}\n")
     else:
         library_added = sync_mod.sync_library_files(
             session, state, existing_names, dry_run,
@@ -385,11 +393,11 @@ def _run_sync(job: SyncJob, options: dict):
             sync_mod.save_sync_state(state)
 
     elapsed = time.time() - start
-    print(f"\n✅ Sync complete in {elapsed:.1f}s")
-    print(f"   Archives uploaded     : {archives_added}")
-    print(f"   Library files uploaded: {library_added}")
+    print(f"\n✅ {job.t('log.sync_complete', elapsed=f'{elapsed:.1f}')}")
+    print(f"   {job.t('log.archives_uploaded')}     : {archives_added}")
+    print(f"   {job.t('log.library_files_uploaded')}: {library_added}")
     if dry_run:
-        print("   (dry-run — no changes were made)")
+        print(f"   {job.t('log.dry_run_no_changes')}")
 
     job.result = {
         "archives_added": archives_added,
@@ -403,28 +411,61 @@ def _run_cleanup(job: SyncJob, collection: str, dry_run: bool):
     sync_mod = _load_sync_module()
     session = requests.Session()
 
-    _banner("🧹", "Cleanup started", dry_run)
+    _banner("🧹", "log.cleanup_started_banner", job.t, dry_run)
 
     scopes = sync_mod.MANYFOLD_SCOPES
     if "delete" not in scopes.split():
         scopes = f"{scopes} delete"
     if not sync_mod.obtain_manyfold_token(session, scopes=scopes):
-        print("❌ Could not obtain a delete-capable token.")
+        print(f"❌ {job.t('log.could_not_obtain_token')}")
         job.result = {"deleted": 0}
         return
 
     target = None if collection.upper() == "ALL" else collection
     deleted = sync_mod.cleanup_empty_models(session, target, dry_run)
-    print(f"\n✅ Cleanup complete — {deleted} empty model(s) "
-          f"{'would be ' if dry_run else ''}deleted.")
+    key = "log.cleanup_complete_dry_run" if dry_run else "log.cleanup_complete"
+    print(f"\n✅ {job.t(key, deleted=deleted)}")
     job.result = {"deleted": deleted}
 
 
 # ── Routes: pages + PWA assets ────────────────────────────────────────────────
 
+LANG_COOKIE_NAME = "lang"
+LANG_COOKIE_MAX_AGE = 365 * 24 * 3600
+
+
+def _resolve_request_locale() -> str:
+    """?lang= query override > lang cookie > browser Accept-Language > default.
+
+    See i18n.resolve_locale for the actual precedence/matching logic — this
+    just pulls the three candidate values out of the current Flask request.
+    """
+    return i18n.resolve_locale(
+        request.headers.get("Accept-Language"),
+        request.args.get("lang"),
+        request.cookies.get(LANG_COOKIE_NAME),
+    )
+
+
 @app.get("/")
 def index():
-    return render_template("index.html", version=APP_VERSION)
+    lang = _resolve_request_locale()
+    translator = i18n.Translator(lang)
+    resp = make_response(
+        render_template(
+            "index.html",
+            version=APP_VERSION,
+            lang=lang,
+            supported_langs=i18n.SUPPORTED_LANGS,
+            t=translator.t,
+            translations=i18n.TRANSLATIONS.get(lang, i18n.TRANSLATIONS[i18n.DEFAULT_LANG]),
+        )
+    )
+    # Remember an explicit ?lang= choice so it sticks on the next visit (e.g.
+    # after adding the PWA to the home screen, where there's no address bar).
+    if request.args.get("lang") in i18n.TRANSLATIONS:
+        resp.set_cookie(LANG_COOKIE_NAME, lang, max_age=LANG_COOKIE_MAX_AGE, samesite="Lax")
+    return resp
 
 
 @app.get("/sw.js")
@@ -547,15 +588,17 @@ def health():
 
 @app.post("/api/models/load")
 def start_load():
+    lang = _resolve_request_locale()
+    t = i18n.Translator(lang).t
     cfg = load_web_config()
     missing = _validate_config(cfg)
     if missing:
-        return jsonify(ok=False, error="Missing config: " + ", ".join(missing)), 400
+        return jsonify(ok=False, error=t("web.missing_config", fields=", ".join(missing))), 400
     _set_env(cfg)
 
-    job = _try_start_job("load", {}, _run_load)
+    job = _try_start_job("load", {}, _run_load, lang=lang)
     if job is None:
-        return jsonify(ok=False, error="A job is already running"), 409
+        return jsonify(ok=False, error=t("web.job_already_running")), 409
     return jsonify(ok=True, job_id=job.id), 202
 
 
@@ -566,10 +609,12 @@ def get_models():
 
 @app.post("/api/sync/start")
 def start_sync():
+    lang = _resolve_request_locale()
+    t = i18n.Translator(lang).t
     cfg = load_web_config()
     missing = _validate_config(cfg)
     if missing:
-        return jsonify(ok=False, error="Missing config: " + ", ".join(missing)), 400
+        return jsonify(ok=False, error=t("web.missing_config", fields=", ".join(missing))), 400
     _set_env(cfg)
 
     body = request.get_json(force=True, silent=True) or {}
@@ -584,18 +629,20 @@ def start_sync():
         "selected_library_file_ids": body.get("selected_library_file_ids"),
     }
 
-    job = _try_start_job("sync", options, lambda job: _run_sync(job, options))
+    job = _try_start_job("sync", options, lambda job: _run_sync(job, options), lang=lang)
     if job is None:
-        return jsonify(ok=False, error="A job is already running"), 409
+        return jsonify(ok=False, error=t("web.job_already_running")), 409
     return jsonify(ok=True, job_id=job.id), 202
 
 
 @app.post("/api/cleanup/start")
 def start_cleanup():
+    lang = _resolve_request_locale()
+    t = i18n.Translator(lang).t
     cfg = load_web_config()
     missing = _validate_config(cfg)
     if missing:
-        return jsonify(ok=False, error="Missing config: " + ", ".join(missing)), 400
+        return jsonify(ok=False, error=t("web.missing_config", fields=", ".join(missing))), 400
     _set_env(cfg)
 
     body = request.get_json(force=True, silent=True) or {}
@@ -605,9 +652,10 @@ def start_cleanup():
     job = _try_start_job(
         "cleanup", {"collection": collection, "dry_run": dry_run},
         lambda job: _run_cleanup(job, collection, dry_run),
+        lang=lang,
     )
     if job is None:
-        return jsonify(ok=False, error="A job is already running"), 409
+        return jsonify(ok=False, error=t("web.job_already_running")), 409
     return jsonify(ok=True, job_id=job.id), 202
 
 
@@ -615,9 +663,9 @@ def start_cleanup():
 def cancel_sync():
     job = _current_job
     if job is None or job.status != "running":
-        return jsonify(ok=False, error="No job is running"), 409
+        return jsonify(ok=False, error=i18n.Translator(_resolve_request_locale()).t("web.no_job_running")), 409
     job.cancel_requested = True
-    job.emit("\n⚠️  Stop requested — will halt after the current phase.\n")
+    job.emit(f"\n⚠️  {job.t('log.stop_requested')}\n")
     return jsonify(ok=True)
 
 
