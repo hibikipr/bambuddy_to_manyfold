@@ -1,3 +1,15 @@
+[lint]
+# Explicit, not relying on ruff's implicit default: with only
+# [lint.per-file-ignores] below and no `select` at all, ruff 0.15 resolved to
+# its documented minimal default (E4/E7/E9/F) — but ruff 0.16 resolves the
+# exact same config to something close to every rule category enabled
+# (bandit-style S rules, pylint PL rules, flake8-datetimez DTZ rules, isort
+# I rules, etc.), surfacing 72 findings across categories this project never
+# actually opted into. Pinning the selection explicitly restores the
+# original, intended behavior and stops it from silently changing again on
+# a future ruff upgrade.
+select = ["E4", "E7", "E9", "F"]
+
 [lint.per-file-ignores]
 # Pre-existing style nit in the CLI engine, which the web GUI conversion
 # deliberately leaves untouched (see README) rather than risk any behavior
