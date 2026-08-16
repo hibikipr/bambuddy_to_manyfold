@@ -1039,18 +1039,23 @@ def create_manyfold_model_from_upload(
 ) -> bool:
     """Create a model in Manyfold from a previously-uploaded Tus file.
 
-    Manyfold creates models *from* uploaded files (async) — there is no
-    "empty model" concept in the API. Returns True on 202 Accepted.
+    A single-file (non-multi-model) creation is synchronous and returns 201
+    Created with a ``Location`` header pointing straight at the new model.
+    Manyfold versions before 2026-07-09 (and the multi-archive-split case)
+    instead process the creation asynchronously and return 202 Accepted with
+    no way to identify the new model from the response — that case falls
+    back to polling by diffing the model list before/after.
 
-    If ``source_url`` is given, the model is located after the async creation
-    job runs; with ``add_link`` the URL is PATCHed on as a link (the upload
-    endpoint can't accept links directly), and with ``enrich`` the MakerWorld
-    design metadata (description, tags, creator, cover image) is applied. When
-    ``design`` is provided it's reused (the caller already resolved it to name
-    the model); otherwise enrich resolves it. All best-effort.
+    If ``source_url`` is given, the model is located (via Location header or,
+    on 202, the poll fallback) so that, with ``add_link``, the URL can be
+    PATCHed on as a link (the upload endpoint can't accept links directly),
+    and with ``enrich``, the MakerWorld design metadata (description, tags,
+    creator, cover image) is applied. When ``design`` is provided it's reused
+    (the caller already resolved it to name the model); otherwise enrich
+    resolves it. All best-effort.
     """
-    # Snapshot existing model IDs first so we can detect the newly-created one
-    # by diff after the async job runs (needed to attach a link / enrich).
+    # Snapshot existing model IDs first (202 fallback only) so we can detect
+    # the newly-created one by diff after an async creation job runs.
     need_lookup = bool(source_url) and (add_link or enrich)
     existing_ids = _get_all_manyfold_model_ids(session) if need_lookup else set()
 
@@ -1067,12 +1072,14 @@ def create_manyfold_model_from_upload(
     }
 
     resp = manyfold_post(session, f"{MANYFOLD_URL}/models", payload, timeout=60)
-    if resp.status_code != 202:
+    if resp.status_code not in (201, 202):
         print(f"    ⚠️  Model create failed for '{name}': {resp.status_code} {resp.text[:300]}")
         return False
 
     if need_lookup:
-        model_id = _poll_for_new_manyfold_model(session, existing_ids)
+        model_id = _model_id_from_location(resp) if resp.status_code == 201 else None
+        if model_id is None and resp.status_code == 202:
+            model_id = _poll_for_new_manyfold_model(session, existing_ids)
         if model_id:
             # No custom link text — Manyfold renders its own site-derived label
             # (e.g. "MakerWorld"). Sending our own text just doubles up next to it.
@@ -1084,6 +1091,14 @@ def create_manyfold_model_from_upload(
             print(f"    ⚠️  Created '{name}' but couldn't locate it to attach the source link / details.")
 
     return True
+
+
+def _model_id_from_location(resp: requests.Response) -> str | None:
+    """Extract a Manyfold model id from a 201 Created response's Location header."""
+    location = resp.headers.get("Location", "")
+    if not location:
+        return None
+    return location.rstrip("/").split("/")[-1] or None
 
 
 def _poll_for_new_manyfold_model(
@@ -1182,6 +1197,8 @@ def create_manyfold_model_with_files(
     if not refs:
         return None, []
 
+    # Snapshot existing model IDs first (202 fallback only) — see
+    # create_manyfold_model_from_upload for why 201 doesn't need this.
     existing_ids = _get_all_manyfold_model_ids(session)
     payload = {
         "name": name,
@@ -1189,11 +1206,13 @@ def create_manyfold_model_with_files(
         "isPartOf": [{"@id": collection_at_id}] if collection_at_id else [],
     }
     resp = manyfold_post(session, f"{MANYFOLD_URL}/models", payload, timeout=120)
-    if resp.status_code != 202:
+    if resp.status_code not in (201, 202):
         print(f"    ⚠️  Model create failed for '{name}': {resp.status_code} {resp.text[:300]}")
         return None, []
 
-    model_id = _poll_for_new_manyfold_model(session, existing_ids)
+    model_id = _model_id_from_location(resp) if resp.status_code == 201 else None
+    if model_id is None and resp.status_code == 202:
+        model_id = _poll_for_new_manyfold_model(session, existing_ids)
     if not model_id:
         print(f"    ⚠️  Created '{name}' but couldn't locate it for details.")
         return None, []
