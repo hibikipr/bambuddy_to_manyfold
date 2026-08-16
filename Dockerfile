@@ -26,7 +26,7 @@ VOLUME ["/data"]
 EXPOSE 8089
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8089/',timeout=4).status==200 else 1)"
+  CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8089/',timeout=4).status==200 else 1)"]
 
 # One worker (single in-flight sync job, enforced by an in-process lock) +
 # threads for SSE connections held open for a sync's full multi-minute
