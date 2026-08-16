@@ -1561,6 +1561,10 @@ def sync_library_files(
             tqdm.write(f"  🔗 MakerWorld source: {rep_url}")
 
         existing_model_id = synced_mw.get(mw_id)
+        # Whether we've already enriched this design in a prior run — governs
+        # whether to (re-)apply MakerWorld extras below. Must be captured before
+        # the by-title reuse lookup mutates synced_mw.
+        already_enriched = existing_model_id is not None
 
         if dry_run:
             verb = "add to existing model" if existing_model_id else "create model"
@@ -1613,15 +1617,23 @@ def sync_library_files(
                 )
                 if not model_id:
                     return 0
-                apply_makerworld_extras(
-                    session, model_id, model_name, rep_url,
-                    add_source_links, enrich_from_makerworld, design,
-                )
                 existing_names.add(model_name)
 
         if not synced_fids:
             tqdm.write("  ⚠️  No files added this run — will retry on next sync")
             return 0
+
+        # Applies on both branches: a model reused by title match (not by our own
+        # prior-run state) has never actually been enriched by us before —
+        # skipping it here silently dropped the cover image/description/tags for
+        # every design that happened to already exist in Manyfold by name. Gated
+        # on `already_enriched` (and on synced_fids above) so a re-sync doesn't
+        # re-attach a duplicate cover image on every run.
+        if not already_enriched:
+            apply_makerworld_extras(
+                session, model_id, model_name, rep_url,
+                add_source_links, enrich_from_makerworld, design,
+            )
         synced_mw[mw_id] = model_id
         for fid in synced_fids:
             synced_ids.add(fid)
