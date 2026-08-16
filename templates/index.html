@@ -458,7 +458,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 function applyModels(data){
-  archiveRows = (data.archives||[]).map(r => ({...r, checked: r.status !== 'synced'}));
+  archiveRows = (data.archives||[]).map(r => ({...r, checked: false}));
   libraryRows = (data.library_files||[]).map(r => ({...r, checked: r.status !== 'synced'}));
   renderAll();
   if(archiveRows.length || libraryRows.length) $('runBtn').disabled = false;
