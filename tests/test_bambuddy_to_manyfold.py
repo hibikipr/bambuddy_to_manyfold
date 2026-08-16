@@ -327,3 +327,64 @@ def test_create_model_with_files_202_falls_back_to_polling():
     assert model_id == "grp2"
     assert ok_ids == [1, 2]
     mock_poll.assert_called_once()
+
+
+# ── process_single MakerWorld enrichment (single-profile designs) ───────────
+#
+# Same gap as process_group, but in the singles path: a design whose model
+# already exists in Manyfold by title match was fully skipped — no file
+# added, no enrichment attempted — and crucially this skip ignored --force,
+# so even an explicit forced resync could never pick up a missing cover
+# image once the model existed.
+
+_SINGLE_ENTRY = [{"id": 1, "filename": "solo.3mf", "folder_id": None}]
+
+
+def _run_single_sync(state: dict, existing_names: set, force: bool = False):
+    """Drive sync_library_files for a single non-grouped MakerWorld file,
+    mocking every module-level function that would otherwise hit the network.
+    Returns the mocked apply_makerworld_extras for assertions.
+    """
+    with (
+        patch("bambuddy_to_manyfold.get_bambuddy_library_files", return_value=_SINGLE_ENTRY),
+        patch(
+            "bambuddy_to_manyfold.get_bambuddy_makerworld_urls",
+            return_value={1: "https://makerworld.com/models/555#profileId-1"},
+        ),
+        patch("bambuddy_to_manyfold.get_bambuddy_library_folders", return_value=[]),
+        patch("bambuddy_to_manyfold.get_existing_manyfold_collections", return_value={}),
+        patch("bambuddy_to_manyfold.get_makerworld_design", return_value={"title": "Solo Model"}),
+        patch("bambuddy_to_manyfold.find_manyfold_model_id_by_name", return_value="existing456"),
+        patch("bambuddy_to_manyfold.apply_makerworld_extras") as mock_enrich,
+        patch("bambuddy_to_manyfold.upload_model_to_manyfold") as mock_upload,
+    ):
+        sync_library_files(MagicMock(), state, existing_names, dry_run=False, force=force)
+        mock_upload.assert_not_called()  # sanity: this test is the reuse-by-name path
+        return mock_enrich
+
+
+def test_single_reused_by_name_still_gets_enriched():
+    """First time we see this design, and Manyfold already has a same-titled
+    model — enrichment must run even though no new file is uploaded.
+    """
+    mock_enrich = _run_single_sync(state={}, existing_names={"Solo Model"})
+    mock_enrich.assert_called_once()
+    assert mock_enrich.call_args.args[1] == "existing456"  # model_id
+
+
+def test_single_already_synced_does_not_re_enrich_without_force():
+    """A file we've already processed in a prior run must NOT be re-enriched
+    on every subsequent ordinary sync.
+    """
+    state = {"synced_library_files": [1]}
+    mock_enrich = _run_single_sync(state=state, existing_names={"Solo Model"})
+    mock_enrich.assert_not_called()
+
+
+def test_single_force_re_enriches_already_synced():
+    """--force is the user's explicit request to redo the work — it must
+    actually re-attempt enrichment even for a file already marked synced.
+    """
+    state = {"synced_library_files": [1]}
+    mock_enrich = _run_single_sync(state=state, existing_names={"Solo Model"}, force=True)
+    mock_enrich.assert_called_once()
