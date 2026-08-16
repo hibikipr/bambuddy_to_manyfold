@@ -1518,7 +1518,25 @@ def sync_library_files(
             dprint(f"    (no MakerWorld link for file id {file_id} — not in recent-imports window)")
 
         if model_name in existing_names:
-            tqdm.write(f"  ⏭  Already in Manyfold (skipping duplicate): {model_name}")
+            # First time we've reached this design (or an explicit --force
+            # retry) and Manyfold already has a same-titled model: mirror
+            # process_group's reuse path — apply MakerWorld enrichment to it
+            # instead of silently doing nothing, since the model existing
+            # under this name doesn't mean we've ever enriched it ourselves.
+            # Gated on (force or file not previously synced by us) so an
+            # ordinary re-sync doesn't re-attach a duplicate cover image.
+            if source_url and enrich_from_makerworld and (force or file_id not in synced_ids):
+                existing_model_id = find_manyfold_model_id_by_name(session, model_name)
+                if existing_model_id:
+                    tqdm.write(f"  🔎 Applying MakerWorld details to existing model: {model_name}")
+                    apply_makerworld_extras(
+                        session, existing_model_id, model_name, source_url,
+                        add_source_links, enrich_from_makerworld, design,
+                    )
+                else:
+                    tqdm.write(f"  ⏭  Already in Manyfold (skipping duplicate): {model_name}")
+            else:
+                tqdm.write(f"  ⏭  Already in Manyfold (skipping duplicate): {model_name}")
             synced_ids.add(file_id)
             return 0
 
