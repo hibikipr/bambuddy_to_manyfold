@@ -210,6 +210,7 @@
     <div class="tabs">
       <button class="tab-btn active" data-tab="archives">{{ t('common.action.archives_tab') }} (<span id="archCount">0</span>)</button>
       <button class="tab-btn" data-tab="library">{{ t('common.action.library_tab') }} (<span id="libCount">0</span>)</button>
+      <button class="tab-btn" data-tab="makerworld_urls">{{ t('common.action.makerworld_urls_tab') }}</button>
     </div>
     <div class="tab-panel active" data-tab="archives">
       <div class="list-toolbar">
@@ -236,6 +237,13 @@
         <span class="status" data-key="status">{{ t('common.action.status') }}</span>
       </div>
       <div id="libList" class="model-list"></div>
+    </div>
+    <div class="tab-panel" data-tab="makerworld_urls">
+      <p class="muted">{{ t('web.makerworld_urls_hint') }}</p>
+      <textarea id="mwUrlsInput" rows="8" placeholder="{{ t('web.makerworld_urls_placeholder') }}"></textarea>
+      <div class="actions-bar" style="margin-top:10px">
+        <button id="urlSyncBtn" class="btn-primary">{{ t('web.fetch_sync_urls_button') }}</button>
+      </div>
     </div>
   </div>
 
@@ -488,6 +496,7 @@ function setRunningUI(running){
   $('loadBtn').disabled = running;
   $('runBtn').disabled = running || (archiveRows.length===0 && libraryRows.length===0);
   $('cleanupBtn').disabled = running;
+  $('urlSyncBtn').disabled = running;
   $('stopBtn').disabled = !running;
   $('progress').classList.toggle('active', running);
 }
@@ -524,6 +533,12 @@ function onJobDone(kind, payload){
     }
   } else if(kind === 'cleanup'){
     toast(t('web.cleanup_complete_toast',{deleted:result.deleted||0}));
+  } else if(kind === 'makerworld_urls'){
+    toast(t('web.makerworld_url_sync_complete_toast',{synced:result.synced||0}));
+    if(!result.dry_run){
+      // Newly-imported files should now show as synced in the Library tab.
+      setTimeout(startLoad, 500);
+    }
   }
 }
 
@@ -567,6 +582,28 @@ $('runBtn').onclick = async () => {
     setRunningUI(true);
     openStream();
   }catch(e){ toast(t('web.sync_failed_to_start'), false); }
+};
+
+$('urlSyncBtn').onclick = async () => {
+  const urls = $('mwUrlsInput').value;
+  if(!urls.trim()){ toast(t('web.no_urls_entered'), false); return; }
+  const body = {
+    urls,
+    dry_run: $('opt_dry_run').checked,
+    create_missing: $('opt_create_missing').checked,
+    force: $('opt_force').checked,
+    add_links: $('opt_add_links').checked,
+    enrich: $('opt_enrich').checked,
+    group_makerworld: $('opt_group').checked,
+  };
+  try{
+    const r = await fetch('/api/makerworld-urls/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if(!d.ok){ toast(d.error || t('web.could_not_start_makerworld_url_sync'), false); return; }
+    currentJobKind = 'makerworld_urls';
+    setRunningUI(true);
+    openStream();
+  }catch(e){ toast(t('web.makerworld_url_sync_failed_to_start'), false); }
 };
 
 $('stopBtn').onclick = async () => {

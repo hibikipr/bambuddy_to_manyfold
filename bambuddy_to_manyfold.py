@@ -264,6 +264,57 @@ def get_makerworld_design(session: requests.Session, source_url: str) -> dict | 
         return None
 
 
+def import_makerworld_url(session: requests.Session, url: str) -> tuple[int | None, str | None, str | None]:
+    """Import a MakerWorld URL into Bambuddy's library.
+
+    Returns ``(library_file_id, canonical_source_url, error_message)`` — on
+    success ``error_message`` is None; on failure the first two are None.
+
+    Reuses Bambuddy's ``/makerworld/import`` endpoint, which is idempotent by
+    canonical source URL — importing a URL that's already in the library just
+    returns the existing LibraryFile, no re-download. This lets pasted URLs
+    cover both "already imported, just past the 50-item recent-imports
+    discovery window" and "never imported at all" uniformly, with no need to
+    separately check which case applies. If the URL has no ``#profileId-``
+    fragment, Bambuddy picks a default profile and reports which one it
+    picked — that's reflected in the returned canonical URL.
+    """
+    model_id = _makerworld_model_id(url)
+    if model_id is None:
+        return None, None, f"Not a recognisable MakerWorld model URL: {url}"
+    profile_id = _makerworld_profile_id(url)
+
+    body: dict = {"model_id": int(model_id)}
+    if profile_id is not None:
+        body["profile_id"] = int(profile_id)
+
+    try:
+        resp = session.post(
+            f"{BAMBUDDY_URL}/api/v1/makerworld/import",
+            json=body,
+            headers=bambuddy_headers(),
+            timeout=120,
+        )
+    except Exception as e:
+        return None, None, f"MakerWorld import request failed for {url}: {e}"
+
+    if not resp.ok:
+        return None, None, f"MakerWorld import failed for {url}: {resp.status_code} {resp.text[:200]}"
+
+    data = resp.json()
+    file_id = data.get("library_file_id")
+    if file_id is None:
+        return None, None, f"MakerWorld import for {url} returned no library_file_id"
+
+    resolved_profile_id = data.get("profile_id")
+    canonical_url = (
+        f"https://makerworld.com/models/{model_id}#profileId-{resolved_profile_id}"
+        if resolved_profile_id
+        else f"https://makerworld.com/models/{model_id}"
+    )
+    return int(file_id), canonical_url, None
+
+
 def download_makerworld_image(session: requests.Session, image_url: str, dest: Path) -> bool:
     """Download a MakerWorld CDN image via Bambuddy's thumbnail proxy."""
     try:
@@ -1129,6 +1180,18 @@ def _makerworld_model_id(source_url: str | None) -> str | None:
     return match.group(1) if match else None
 
 
+def _makerworld_profile_id(source_url: str | None) -> str | None:
+    """Extract the MakerWorld ``#profileId-`` fragment from a URL, if present.
+
+    Mirrors Bambuddy's own ``_PROFILE_ID_RE`` (accepts both the ``-`` and
+    legacy ``=`` separators MakerWorld share links have used).
+    """
+    if not source_url:
+        return None
+    match = re.search(r"#profileId[-=](\d+)", source_url)
+    return match.group(1) if match else None
+
+
 def find_manyfold_model_id_by_name(session: requests.Session, name: str) -> str | None:
     """Return the slug/ID of a Manyfold model whose name matches (paginated search)."""
     target = name.strip().lower()
@@ -1418,6 +1481,7 @@ def sync_library_files(
     add_source_links: bool = True,
     enrich_from_makerworld: bool = True,
     group_makerworld_profiles: bool = True,
+    extra_makerworld_urls: dict[int, str] | None = None,
 ) -> int:
     if selected_ids is not None and len(selected_ids) == 0:
         print("\n📁 No library files selected — skipping.")
@@ -1426,9 +1490,14 @@ def sync_library_files(
     if selected_ids is not None:
         lib_files = [f for f in lib_files if f.get("id") in selected_ids]
     # Map of library_file_id → MakerWorld source URL (for links + enrichment +
-    # grouping — all need the URLs).
+    # grouping — all need the URLs). get_bambuddy_makerworld_urls only ever
+    # sees the 50 most-recently-imported files (Bambuddy's own API cap);
+    # extra_makerworld_urls lets a caller (e.g. the paste-a-URL sync) supply
+    # the source URL directly for specific files, bypassing that cap entirely.
     need_urls = add_source_links or enrich_from_makerworld or group_makerworld_profiles
     makerworld_urls = get_bambuddy_makerworld_urls(session) if need_urls else {}
+    if extra_makerworld_urls:
+        makerworld_urls = {**makerworld_urls, **extra_makerworld_urls}
     flat_folders = _flatten_folders(get_bambuddy_library_folders(session))
     # Map bambuddy folder_id → folder dict (with _full_path)
     folder_by_id: dict[int, dict] = {f["id"]: f for f in flat_folders}
@@ -1715,6 +1784,79 @@ def sync_library_files(
     state["synced_library_folders"] = {str(k): v for k, v in folder_to_collection.items()}
     state["synced_makerworld_models"] = synced_mw
     return new_count
+
+
+def sync_makerworld_urls(
+    session: requests.Session,
+    state: dict,
+    existing_names: set,
+    urls: list[str],
+    dry_run: bool,
+    create_missing: bool = True,
+    force: bool = False,
+    add_source_links: bool = True,
+    enrich_from_makerworld: bool = True,
+    group_makerworld_profiles: bool = True,
+) -> int:
+    """Sync a pasted list of MakerWorld URLs to Manyfold.
+
+    Each URL is imported into Bambuddy's library first (idempotent — a URL
+    already imported just returns the existing file, no re-download), which
+    sidesteps the 50-item cap on Bambuddy's own recent-imports discovery
+    endpoint (get_bambuddy_makerworld_urls). The imported files are then
+    handed to sync_library_files completely unchanged — same
+    creation/reuse/enrichment/grouping logic as a normal library sync, just
+    scoped to these specific files with their source URL supplied directly
+    via extra_makerworld_urls.
+    """
+    # Dedupe by (model_id, profile_id) rather than raw string, so URL variants
+    # of the same plate collapse together the same way Bambuddy's own
+    # canonical-URL logic does; first occurrence of a key wins.
+    parsed: dict[tuple[str, str | None], str] = {}
+    for line in urls:
+        line = line.strip()
+        if not line:
+            continue
+        model_id = _makerworld_model_id(line)
+        if model_id is None:
+            print(f"  ⚠️  Skipping — not a recognisable MakerWorld model URL: {line}")
+            continue
+        parsed.setdefault((model_id, _makerworld_profile_id(line)), line)
+
+    if not parsed:
+        print("\n🔗 No valid MakerWorld URLs to import — skipping.")
+        return 0
+
+    print(f"\n🔗 Importing {len(parsed)} MakerWorld URL(s) into Bambuddy...")
+    if dry_run:
+        for line in parsed.values():
+            print(f"  [dry-run] Would import: {line}")
+        return len(parsed)
+
+    # A bad/unreachable URL is logged and skipped — never aborts the batch.
+    file_urls: dict[int, str] = {}
+    for line in parsed.values():
+        file_id, canonical_url, error = import_makerworld_url(session, line)
+        if error:
+            print(f"  ⚠️  {error}")
+            continue
+        file_urls[file_id] = canonical_url
+        print(f"  ✅ Imported: {canonical_url}")
+
+    if not file_urls:
+        print("  ⚠️  No URLs imported successfully — nothing to sync.")
+        return 0
+
+    return sync_library_files(
+        session, state, existing_names, dry_run,
+        selected_ids=set(file_urls),
+        create_missing=create_missing,
+        force=force,
+        add_source_links=add_source_links,
+        enrich_from_makerworld=enrich_from_makerworld,
+        group_makerworld_profiles=group_makerworld_profiles,
+        extra_makerworld_urls=file_urls,
+    )
 
 
 def check_connections(session: requests.Session):
