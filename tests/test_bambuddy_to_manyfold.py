@@ -23,6 +23,7 @@ from bambuddy_to_manyfold import (
     _slugify,
     create_manyfold_model_from_upload,
     create_manyfold_model_with_files,
+    get_makerworld_status,
     import_makerworld_url,
     sync_library_files,
     sync_makerworld_urls,
@@ -412,6 +413,30 @@ def test_single_force_re_enriches_already_synced():
     mock_enrich.assert_called_once()
 
 
+# ── get_makerworld_status ────────────────────────────────────────────────────
+
+def test_get_makerworld_status_success():
+    session = MagicMock()
+    resp = MagicMock(ok=True)
+    resp.json.return_value = {"has_cloud_token": True, "can_download": True, "sign_in_expired": False}
+    session.get.return_value = resp
+    assert get_makerworld_status(session) == {
+        "has_cloud_token": True, "can_download": True, "sign_in_expired": False,
+    }
+
+
+def test_get_makerworld_status_non_ok_returns_none():
+    session = MagicMock()
+    session.get.return_value = MagicMock(ok=False, status_code=500)
+    assert get_makerworld_status(session) is None
+
+
+def test_get_makerworld_status_request_exception_returns_none():
+    session = MagicMock()
+    session.get.side_effect = RuntimeError("boom")
+    assert get_makerworld_status(session) is None
+
+
 # ── import_makerworld_url ────────────────────────────────────────────────────
 
 def _mock_import_response(status_ok, library_file_id=None, profile_id=None, status_code=200, text=""):
@@ -578,3 +603,93 @@ def test_sync_makerworld_urls_no_valid_urls_skips_everything():
     assert count == 0
     mock_import.assert_not_called()
     mock_sync.assert_not_called()
+
+
+def test_sync_makerworld_urls_expired_signin_skips_import_attempts(capsys):
+    """Every /makerworld/import call needs a valid Bambu Cloud token — if
+    Bambuddy reports the sign-in has expired, don't attempt N imports that
+    will all fail identically; print one clear message and stop.
+    """
+    with (
+        patch(
+            "bambuddy_to_manyfold.get_makerworld_status",
+            return_value={"has_cloud_token": True, "can_download": False, "sign_in_expired": True},
+        ),
+        patch("bambuddy_to_manyfold.import_makerworld_url") as mock_import,
+        patch("bambuddy_to_manyfold.sync_library_files") as mock_sync,
+    ):
+        count = sync_makerworld_urls(MagicMock(), {}, set(), ["https://makerworld.com/models/1"], dry_run=False)
+    assert count == 0
+    mock_import.assert_not_called()
+    mock_sync.assert_not_called()
+    assert "sign-in" in capsys.readouterr().out.lower()
+
+
+def test_sync_makerworld_urls_no_cloud_token_skips_import_attempts(capsys):
+    with (
+        patch(
+            "bambuddy_to_manyfold.get_makerworld_status",
+            return_value={"has_cloud_token": False, "can_download": False, "sign_in_expired": False},
+        ),
+        patch("bambuddy_to_manyfold.import_makerworld_url") as mock_import,
+        patch("bambuddy_to_manyfold.sync_library_files") as mock_sync,
+    ):
+        count = sync_makerworld_urls(MagicMock(), {}, set(), ["https://makerworld.com/models/1"], dry_run=False)
+    assert count == 0
+    mock_import.assert_not_called()
+    mock_sync.assert_not_called()
+
+
+def test_sync_makerworld_urls_expired_signin_still_previews_in_dry_run(capsys):
+    """Dry-run should still warn about the expired sign-in, but keep showing
+    the normal per-URL preview rather than stopping early — nothing real
+    happens in dry-run either way.
+    """
+    with (
+        patch(
+            "bambuddy_to_manyfold.get_makerworld_status",
+            return_value={"has_cloud_token": True, "can_download": False, "sign_in_expired": True},
+        ),
+        patch("bambuddy_to_manyfold.import_makerworld_url") as mock_import,
+    ):
+        count = sync_makerworld_urls(MagicMock(), {}, set(), ["https://makerworld.com/models/1"], dry_run=True)
+    assert count == 1
+    mock_import.assert_not_called()
+    out = capsys.readouterr().out.lower()
+    assert "sign-in" in out
+    assert "would import" in out
+
+
+def test_sync_makerworld_urls_healthy_status_proceeds_normally():
+    with (
+        patch(
+            "bambuddy_to_manyfold.get_makerworld_status",
+            return_value={"has_cloud_token": True, "can_download": True, "sign_in_expired": False},
+        ),
+        patch(
+            "bambuddy_to_manyfold.import_makerworld_url",
+            return_value=(101, "https://makerworld.com/models/1#profileId-11", None),
+        ),
+        patch("bambuddy_to_manyfold.sync_library_files", return_value=1) as mock_sync,
+    ):
+        count = sync_makerworld_urls(MagicMock(), {}, set(), ["https://makerworld.com/models/1"], dry_run=False)
+    assert count == 1
+    mock_sync.assert_called_once()
+
+
+def test_sync_makerworld_urls_status_check_failure_proceeds_normally():
+    """If the status probe itself fails (network hiccup, older Bambuddy
+    without the endpoint), don't block the whole sync on it — fall through
+    to the existing per-URL error handling instead.
+    """
+    with (
+        patch("bambuddy_to_manyfold.get_makerworld_status", return_value=None),
+        patch(
+            "bambuddy_to_manyfold.import_makerworld_url",
+            return_value=(101, "https://makerworld.com/models/1#profileId-11", None),
+        ),
+        patch("bambuddy_to_manyfold.sync_library_files", return_value=1) as mock_sync,
+    ):
+        count = sync_makerworld_urls(MagicMock(), {}, set(), ["https://makerworld.com/models/1"], dry_run=False)
+    assert count == 1
+    mock_sync.assert_called_once()
