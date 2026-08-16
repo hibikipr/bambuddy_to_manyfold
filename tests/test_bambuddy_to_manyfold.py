@@ -3,7 +3,14 @@
 These only exercise deterministic, no-I/O logic (slugs, HTML→Markdown, tag
 extraction, URL parsing, folder flattening) — no live Bambuddy/Manyfold
 instance required, mirroring filament_to_bambuddy/tests/test_filament_parse.py.
+
+The grouping-enrichment tests near the bottom are the exception: they drive
+``sync_library_files`` itself (its per-file/per-group logic lives in nested
+closures, not importable standalone), with every module-level function that
+would otherwise touch the network mocked out.
 """
+
+from unittest.mock import MagicMock, patch
 
 from bambuddy_to_manyfold import (
     _extract_makerworld_tags,
@@ -12,6 +19,7 @@ from bambuddy_to_manyfold import (
     _image_ext_from_url,
     _makerworld_model_id,
     _slugify,
+    sync_library_files,
 )
 
 
@@ -133,3 +141,66 @@ def test_flatten_folders_siblings():
 
 def test_flatten_folders_empty():
     assert _flatten_folders([]) == []
+
+
+# ── process_group MakerWorld enrichment (grouped/multi-profile designs) ─────
+#
+# Regression coverage for a gap where a MakerWorld design matched to an
+# ALREADY-EXISTING Manyfold model (by title, on the first run we ever see it)
+# had its profile files added but never got its cover image / description /
+# tags / creator applied, because that only happened on the model-creation
+# branch. See process_group() in bambuddy_to_manyfold.py.
+
+_GROUP_ENTRIES = [
+    {"id": 1, "filename": "plate-a.3mf", "folder_id": None},
+    {"id": 2, "filename": "plate-b.3mf", "folder_id": None},
+]
+
+
+def _run_group_sync(state: dict, existing_names: set):
+    """Drive sync_library_files for a single 2-profile MakerWorld group,
+    mocking every module-level function that would otherwise hit the network.
+    Returns the mocked apply_makerworld_extras for assertions.
+    """
+    with (
+        patch("bambuddy_to_manyfold.get_bambuddy_library_files", return_value=_GROUP_ENTRIES),
+        patch(
+            "bambuddy_to_manyfold.get_bambuddy_makerworld_urls",
+            return_value={
+                1: "https://makerworld.com/models/999#profileId-1",
+                2: "https://makerworld.com/models/999#profileId-2",
+            },
+        ),
+        patch("bambuddy_to_manyfold.get_bambuddy_library_folders", return_value=[]),
+        patch("bambuddy_to_manyfold.get_existing_manyfold_collections", return_value={}),
+        patch("bambuddy_to_manyfold.get_makerworld_design", return_value={"title": "My Model"}),
+        patch("bambuddy_to_manyfold.download_bambuddy_library_file"),
+        patch("bambuddy_to_manyfold.find_manyfold_model_id_by_name", return_value="existing123"),
+        patch("bambuddy_to_manyfold.add_files_to_manyfold_model", return_value=[1, 2]),
+        patch("bambuddy_to_manyfold.create_manyfold_model_with_files") as mock_create,
+        patch("bambuddy_to_manyfold.apply_makerworld_extras") as mock_enrich,
+    ):
+        sync_library_files(
+            MagicMock(), state, existing_names, dry_run=False,
+        )
+        mock_create.assert_not_called()  # sanity: this test is the reuse-by-name path
+        return mock_enrich
+
+
+def test_group_reused_by_name_still_gets_enriched():
+    """First time we see this design, and Manyfold already has a same-titled
+    model (e.g. created by hand) — files get added AND enrichment must run.
+    """
+    mock_enrich = _run_group_sync(state={}, existing_names={"My Model"})
+    mock_enrich.assert_called_once()
+    assert mock_enrich.call_args.args[1] == "existing123"  # model_id
+
+
+def test_group_already_tracked_does_not_re_enrich():
+    """A design we've already synced (and thus already enriched) in a prior
+    run must NOT be re-enriched on every subsequent sync — that would
+    re-attach a duplicate cover image each time.
+    """
+    state = {"synced_makerworld_models": {"999": "existing123"}}
+    mock_enrich = _run_group_sync(state=state, existing_names={"My Model"})
+    mock_enrich.assert_not_called()
