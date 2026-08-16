@@ -239,6 +239,32 @@ def get_bambuddy_makerworld_urls(session: requests.Session) -> dict[int, str]:
     return mapping
 
 
+def get_makerworld_status(session: requests.Session) -> dict | None:
+    """Fetch Bambuddy's MakerWorld/Bambu Cloud auth status.
+
+    Returns ``{"has_cloud_token": bool, "can_download": bool, "sign_in_expired": bool}``
+    or None on failure. Bambu Cloud sign-in lives entirely in Bambuddy (its
+    Profiles page) — this tool has no OAuth/TOTP flow of its own and never
+    could, so the useful thing it CAN do is check this once, up front, and
+    give one clear message instead of every pasted URL failing individually
+    with the same underlying cause.
+    """
+    try:
+        resp = session.get(
+            f"{BAMBUDDY_URL}/api/v1/makerworld/status",
+            headers=bambuddy_headers(),
+            timeout=15,
+        )
+        if not resp.ok:
+            dprint(f"    ⚠️  Could not fetch MakerWorld status: {resp.status_code}")
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        dprint(f"    ⚠️  Could not fetch MakerWorld status: {e}")
+        return None
+
+
 def get_makerworld_design(session: requests.Session, source_url: str) -> dict | None:
     """Resolve a MakerWorld URL to its design metadata via Bambuddy.
 
@@ -1826,6 +1852,30 @@ def sync_makerworld_urls(
     if not parsed:
         print("\n🔗 No valid MakerWorld URLs to import — skipping.")
         return 0
+
+    # Every /makerworld/import call needs a valid Bambu Cloud token — even for
+    # a URL already in the library, Bambuddy re-checks it before the dedup
+    # short-circuit. Check once up front so a dead/missing sign-in prints one
+    # clear message instead of every pasted URL failing individually with the
+    # same raw 401. Bambu Cloud sign-in lives entirely in Bambuddy's own
+    # Profiles page — this tool has no login flow of its own to offer.
+    status = get_makerworld_status(session)
+    if status and status.get("sign_in_expired"):
+        print(
+            "\n⚠️  Your Bambu Cloud sign-in (in Bambuddy) has expired — MakerWorld "
+            "imports will fail until you sign in again. Open Bambuddy → Profiles "
+            "and sign in to Bambu Cloud, then retry this sync."
+        )
+        if not dry_run:
+            return 0
+    elif status and not status.get("has_cloud_token"):
+        print(
+            "\n⚠️  No Bambu Cloud sign-in is configured in Bambuddy — MakerWorld "
+            "imports need one. Open Bambuddy → Profiles and sign in to Bambu "
+            "Cloud, then retry this sync."
+        )
+        if not dry_run:
+            return 0
 
     print(f"\n🔗 Importing {len(parsed)} MakerWorld URL(s) into Bambuddy...")
     if dry_run:
