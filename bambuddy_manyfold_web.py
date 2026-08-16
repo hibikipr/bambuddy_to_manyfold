@@ -407,6 +407,41 @@ def _run_sync(job: SyncJob, options: dict):
     }
 
 
+def _run_makerworld_url_sync(job: SyncJob, options: dict):
+    sync_mod = _load_sync_module()
+    session = requests.Session()
+
+    dry_run = bool(options.get("dry_run"))
+    urls = options.get("urls") or []
+
+    _banner("🔗", "log.makerworld_url_sync_started_banner", job.t, dry_run)
+    sync_mod.check_connections(session)
+
+    state = sync_mod.load_sync_state()
+    existing_names = sync_mod.get_existing_manyfold_models(session)
+    print(f"  ℹ️  {job.t('log.existing_models_found', count=len(existing_names))}\n")
+
+    start = time.time()
+    synced = sync_mod.sync_makerworld_urls(
+        session, state, existing_names, urls, dry_run,
+        create_missing=options.get("create_missing", True),
+        force=options.get("force", False),
+        add_source_links=options.get("add_links", True),
+        enrich_from_makerworld=options.get("enrich", True),
+        group_makerworld_profiles=options.get("group_makerworld", True),
+    )
+    if not dry_run:
+        sync_mod.save_sync_state(state)
+
+    elapsed = time.time() - start
+    print(f"\n✅ {job.t('log.sync_complete', elapsed=f'{elapsed:.1f}')}")
+    print(f"   {job.t('log.library_files_uploaded')}: {synced}")
+    if dry_run:
+        print(f"   {job.t('log.dry_run_no_changes')}")
+
+    job.result = {"synced": synced, "elapsed": elapsed, "dry_run": dry_run}
+
+
 def _run_cleanup(job: SyncJob, collection: str, dry_run: bool):
     sync_mod = _load_sync_module()
     session = requests.Session()
@@ -630,6 +665,36 @@ def start_sync():
     }
 
     job = _try_start_job("sync", options, lambda job: _run_sync(job, options), lang=lang)
+    if job is None:
+        return jsonify(ok=False, error=t("web.job_already_running")), 409
+    return jsonify(ok=True, job_id=job.id), 202
+
+
+@app.post("/api/makerworld-urls/start")
+def start_makerworld_url_sync():
+    lang = _resolve_request_locale()
+    t = i18n.Translator(lang).t
+    cfg = load_web_config()
+    missing = _validate_config(cfg)
+    if missing:
+        return jsonify(ok=False, error=t("web.missing_config", fields=", ".join(missing))), 400
+    _set_env(cfg)
+
+    body = request.get_json(force=True, silent=True) or {}
+    urls = (body.get("urls") or "").splitlines()  # blank/invalid lines are filtered in the engine
+    options = {
+        "urls": urls,
+        "dry_run": bool(body.get("dry_run")),
+        "create_missing": bool(body.get("create_missing", True)),
+        "force": bool(body.get("force")),
+        "add_links": bool(body.get("add_links", True)),
+        "enrich": bool(body.get("enrich", True)),
+        "group_makerworld": bool(body.get("group_makerworld", True)),
+    }
+
+    job = _try_start_job(
+        "makerworld_urls", options, lambda job: _run_makerworld_url_sync(job, options), lang=lang,
+    )
     if job is None:
         return jsonify(ok=False, error=t("web.job_already_running")), 409
     return jsonify(ok=True, job_id=job.id), 202
