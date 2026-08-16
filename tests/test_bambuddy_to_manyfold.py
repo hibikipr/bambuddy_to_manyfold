@@ -18,7 +18,10 @@ from bambuddy_to_manyfold import (
     _html_to_markdown,
     _image_ext_from_url,
     _makerworld_model_id,
+    _model_id_from_location,
     _slugify,
+    create_manyfold_model_from_upload,
+    create_manyfold_model_with_files,
     sync_library_files,
 )
 
@@ -204,3 +207,123 @@ def test_group_already_tracked_does_not_re_enrich():
     state = {"synced_makerworld_models": {"999": "existing123"}}
     mock_enrich = _run_group_sync(state=state, existing_names={"My Model"})
     mock_enrich.assert_not_called()
+
+
+# ── create_manyfold_model_from_upload / create_manyfold_model_with_files ────
+#
+# Regression coverage: Manyfold's single-model POST /models creation became
+# synchronous (201 Created + Location header) instead of async (202
+# Accepted with no way to identify the new model), but these functions only
+# ever accepted 202 — every new-model creation was silently treated as a
+# failure, so no model (and therefore no MakerWorld enrichment/cover image)
+# was ever created for a new design.
+
+def _mock_response(status_code, location=None):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.headers = {"Location": location} if location else {}
+    resp.text = ""
+    return resp
+
+
+def test_model_id_from_location_absolute_url():
+    resp = _mock_response(201, location="https://manyfold.example.com/models/abc123")
+    assert _model_id_from_location(resp) == "abc123"
+
+
+def test_model_id_from_location_relative_path():
+    resp = _mock_response(201, location="/models/abc123")
+    assert _model_id_from_location(resp) == "abc123"
+
+
+def test_model_id_from_location_missing_header():
+    assert _model_id_from_location(_mock_response(201)) is None
+
+
+def test_create_model_from_upload_201_uses_location_directly():
+    """Current Manyfold: synchronous creation — the model id comes straight
+    from the Location header, no polling needed.
+    """
+    session = MagicMock()
+    resp = _mock_response(201, location="https://manyfold.example.com/models/new1")
+    with (
+        patch("bambuddy_to_manyfold.manyfold_post", return_value=resp),
+        patch("bambuddy_to_manyfold._get_all_manyfold_model_ids", return_value=set()),
+        patch("bambuddy_to_manyfold._poll_for_new_manyfold_model") as mock_poll,
+        patch("bambuddy_to_manyfold.add_manyfold_model_link", return_value=True) as mock_link,
+        patch("bambuddy_to_manyfold.enrich_manyfold_model_from_makerworld") as mock_enrich,
+    ):
+        ok = create_manyfold_model_from_upload(
+            session, "My Model", "https://manyfold.example.com/upload/xyz", "model.3mf",
+            source_url="https://makerworld.com/models/1", source_text="MakerWorld", enrich=True,
+        )
+    assert ok is True
+    mock_poll.assert_not_called()
+    mock_link.assert_called_once_with(session, "new1", "https://makerworld.com/models/1")
+    mock_enrich.assert_called_once_with(session, "new1", "My Model", "https://makerworld.com/models/1", design=None)
+
+
+def test_create_model_from_upload_202_falls_back_to_polling():
+    """Older Manyfold / genuinely async creation: 202 with no Location still
+    works via the existing poll-by-diff fallback.
+    """
+    session = MagicMock()
+    resp = _mock_response(202)
+    with (
+        patch("bambuddy_to_manyfold.manyfold_post", return_value=resp),
+        patch("bambuddy_to_manyfold._get_all_manyfold_model_ids", return_value={"old1"}),
+        patch("bambuddy_to_manyfold._poll_for_new_manyfold_model", return_value="new2") as mock_poll,
+        patch("bambuddy_to_manyfold.add_manyfold_model_link", return_value=True) as mock_link,
+        patch("bambuddy_to_manyfold.enrich_manyfold_model_from_makerworld") as mock_enrich,
+    ):
+        ok = create_manyfold_model_from_upload(
+            session, "My Model", "https://manyfold.example.com/upload/xyz", "model.3mf",
+            source_url="https://makerworld.com/models/1", source_text="MakerWorld", enrich=True,
+        )
+    assert ok is True
+    mock_poll.assert_called_once()
+    mock_link.assert_called_once_with(session, "new2", "https://makerworld.com/models/1")
+    mock_enrich.assert_called_once()
+
+
+def test_create_model_from_upload_rejects_unexpected_status():
+    resp = _mock_response(500)
+    with patch("bambuddy_to_manyfold.manyfold_post", return_value=resp):
+        ok = create_manyfold_model_from_upload(
+            MagicMock(), "My Model", "https://manyfold.example.com/upload/xyz", "model.3mf",
+        )
+    assert ok is False
+
+
+def test_create_model_with_files_201_uses_location_directly():
+    session = MagicMock()
+    resp = _mock_response(201, location="https://manyfold.example.com/models/grp1")
+    with (
+        patch("bambuddy_to_manyfold._tus_upload_many", return_value=([{"id": "u1", "name": "a.3mf"}], [1, 2])),
+        patch("bambuddy_to_manyfold._get_all_manyfold_model_ids", return_value=set()),
+        patch("bambuddy_to_manyfold.manyfold_post", return_value=resp),
+        patch("bambuddy_to_manyfold._poll_for_new_manyfold_model") as mock_poll,
+    ):
+        model_id, ok_ids = create_manyfold_model_with_files(
+            session, "Grouped Model", [(1, "a.3mf"), (2, "b.3mf")], None,
+        )
+    assert model_id == "grp1"
+    assert ok_ids == [1, 2]
+    mock_poll.assert_not_called()
+
+
+def test_create_model_with_files_202_falls_back_to_polling():
+    session = MagicMock()
+    resp = _mock_response(202)
+    with (
+        patch("bambuddy_to_manyfold._tus_upload_many", return_value=([{"id": "u1", "name": "a.3mf"}], [1, 2])),
+        patch("bambuddy_to_manyfold._get_all_manyfold_model_ids", return_value={"old1"}),
+        patch("bambuddy_to_manyfold.manyfold_post", return_value=resp),
+        patch("bambuddy_to_manyfold._poll_for_new_manyfold_model", return_value="grp2") as mock_poll,
+    ):
+        model_id, ok_ids = create_manyfold_model_with_files(
+            session, "Grouped Model", [(1, "a.3mf"), (2, "b.3mf")], None,
+        )
+    assert model_id == "grp2"
+    assert ok_ids == [1, 2]
+    mock_poll.assert_called_once()
