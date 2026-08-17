@@ -496,6 +496,43 @@ def test_import_makerworld_url_http_failure():
     assert "502" in error
 
 
+def test_import_makerworld_url_stale_profile_gets_actionable_message():
+    """A URL with an explicit #profileId- that Bambu Lab's API rejects gets a
+    specific, actionable error instead of a raw JSON blob — this is the
+    Bambuddy-side error signature for "this plate no longer belongs to this
+    design", not a generic failure.
+    """
+    session = MagicMock()
+    session.post.return_value = _mock_import_response(
+        False, status_code=502,
+        text='{"detail":"Bambu Lab API unexpected status 400 for profile 1206471"}',
+    )
+    file_id, canonical_url, error = import_makerworld_url(
+        session, "https://makerworld.com/models/1194118#profileId-1206471",
+    )
+    assert file_id is None
+    assert canonical_url is None
+    assert "stale or no longer valid" in error
+    assert "without the #profileId-1206471 fragment" in error
+
+
+def test_import_makerworld_url_same_failure_without_profile_id_stays_generic():
+    """The same Bambuddy error signature, but for a bare URL (no profileId in
+    the request) — shouldn't happen in practice, but must not crash trying
+    to reference a profile_id that was never sent.
+    """
+    session = MagicMock()
+    session.post.return_value = _mock_import_response(
+        False, status_code=502,
+        text='{"detail":"Bambu Lab API unexpected status 400 for profile 999"}',
+    )
+    file_id, canonical_url, error = import_makerworld_url(session, "https://makerworld.com/models/1194118")
+    assert file_id is None
+    assert canonical_url is None
+    assert "stale or no longer valid" not in error
+    assert "502" in error
+
+
 def test_import_makerworld_url_missing_library_file_id():
     session = MagicMock()
     session.post.return_value = _mock_import_response(True, library_file_id=None)
