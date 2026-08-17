@@ -325,7 +325,20 @@ def import_makerworld_url(session: requests.Session, url: str) -> tuple[int | No
         return None, None, f"MakerWorld import request failed for {url}: {e}"
 
     if not resp.ok:
-        return None, None, f"MakerWorld import failed for {url}: {resp.status_code} {resp.text[:200]}"
+        detail = resp.text[:200]
+        # This exact phrase is Bambuddy's own MakerWorldUnavailableError message from
+        # get_profile_download() rejecting the specific plate — Bambu Lab's API doesn't
+        # validate that a #profileId- belongs to the given model_id before this call, so a
+        # stale/edited plate link (the design was updated on MakerWorld since the link was
+        # copied) surfaces as an opaque 400 here rather than a clear "plate not found".
+        if profile_id is not None and "Bambu Lab API unexpected status" in detail:
+            return None, None, (
+                f"MakerWorld import failed for {url}: plate #profileId-{profile_id} looks "
+                f"stale or no longer valid for this design ({resp.status_code} {detail}). "
+                f"Try pasting the URL without the #profileId-{profile_id} fragment to let "
+                f"Bambuddy pick a valid plate automatically."
+            )
+        return None, None, f"MakerWorld import failed for {url}: {resp.status_code} {detail}"
 
     data = resp.json()
     file_id = data.get("library_file_id")
