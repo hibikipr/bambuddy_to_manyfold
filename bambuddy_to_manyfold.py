@@ -354,6 +354,60 @@ def import_makerworld_url(session: requests.Session, url: str) -> tuple[int | No
     return int(file_id), canonical_url, None
 
 
+def import_makerworld_all_profiles(
+    session: requests.Session, model_id: str,
+) -> tuple[dict[int, str], list[str]]:
+    """Import every print profile (plate) of a MakerWorld design.
+
+    Matches Bambuddy's own "Import All" (``MakerworldPage.tsx``'s
+    ``handleImportAll``): resolve the design, then import each instance's
+    profile sequentially, skipping a plate that fails rather than aborting
+    the rest of the design.
+
+    Returns ``({library_file_id: canonical_source_url}, [error messages])``.
+    """
+    try:
+        resp = session.post(
+            f"{BAMBUDDY_URL}/api/v1/makerworld/resolve",
+            json={"url": f"https://makerworld.com/models/{model_id}"},
+            headers=bambuddy_headers(),
+            timeout=45,
+        )
+    except Exception as e:
+        return {}, [f"MakerWorld resolve failed for design {model_id}: {e}"]
+
+    if not resp.ok:
+        detail = resp.text[:200]
+        return {}, [f"MakerWorld resolve failed for design {model_id}: {resp.status_code} {detail}"]
+
+    data = resp.json()
+    instances = data.get("instances")
+
+    profile_ids: list[int] = []
+    if isinstance(instances, list):
+        for inst in instances:
+            if not isinstance(inst, dict):
+                continue
+            pid = inst.get("profileId")
+            if isinstance(pid, int) and pid > 0 and pid not in profile_ids:
+                profile_ids.append(pid)
+
+    if not profile_ids:
+        return {}, [f"MakerWorld design {model_id} has no importable profiles"]
+
+    file_urls: dict[int, str] = {}
+    errors: list[str] = []
+    for pid in profile_ids:
+        file_id, canonical_url, error = import_makerworld_url(
+            session, f"https://makerworld.com/models/{model_id}#profileId-{pid}",
+        )
+        if error:
+            errors.append(error)
+            continue
+        file_urls[file_id] = canonical_url
+    return file_urls, errors
+
+
 def download_makerworld_image(session: requests.Session, image_url: str, dest: Path) -> bool:
     """Download a MakerWorld CDN image via Bambuddy's thumbnail proxy."""
     try:
@@ -1898,7 +1952,19 @@ def sync_makerworld_urls(
 
     # A bad/unreachable URL is logged and skipped — never aborts the batch.
     file_urls: dict[int, str] = {}
-    for line in parsed.values():
+    for (model_id, profile_id), line in parsed.items():
+        if profile_id is None:
+            # Bare URL - import every plate for this design, matching
+            # Bambuddy's own "Import All" behavior, not just whichever one
+            # Bambuddy would auto-pick as the default.
+            new_files, errors = import_makerworld_all_profiles(session, model_id)
+            for error in errors:
+                print(f"  ⚠️  {error}")
+            for file_id, canonical_url in new_files.items():
+                file_urls[file_id] = canonical_url
+                print(f"  ✅ Imported: {canonical_url}")
+            continue
+
         file_id, canonical_url, error = import_makerworld_url(session, line)
         if error:
             print(f"  ⚠️  {error}")

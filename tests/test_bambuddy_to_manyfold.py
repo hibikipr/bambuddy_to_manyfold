@@ -24,6 +24,7 @@ from bambuddy_to_manyfold import (
     create_manyfold_model_from_upload,
     create_manyfold_model_with_files,
     get_makerworld_status,
+    import_makerworld_all_profiles,
     import_makerworld_url,
     sync_library_files,
     sync_makerworld_urls,
@@ -549,6 +550,113 @@ def test_import_makerworld_url_request_exception():
     assert "connection reset" in error
 
 
+def _mock_resolve_response(status_ok, instances=None, status_code=200, text=""):
+    resp = MagicMock()
+    resp.ok = status_ok
+    resp.status_code = status_code
+    resp.text = text
+    resp.json.return_value = {
+        "model_id": 123,
+        "profile_id": None,
+        "design": {},
+        "instances": instances,
+        "already_imported_library_ids": [],
+    }
+    return resp
+
+
+def test_import_makerworld_all_profiles_imports_every_instance():
+    """Matches Bambuddy's own "Import All" — every plate in the resolved
+    design gets imported, not just whichever one Bambuddy would auto-pick.
+    """
+    session = MagicMock()
+    session.post.return_value = _mock_resolve_response(
+        True, instances=[{"id": 1, "profileId": 11}, {"id": 2, "profileId": 22}],
+    )
+    with patch(
+        "bambuddy_to_manyfold.import_makerworld_url",
+        side_effect=[
+            (101, "https://makerworld.com/models/123#profileId-11", None),
+            (102, "https://makerworld.com/models/123#profileId-22", None),
+        ],
+    ) as mock_import:
+        file_urls, errors = import_makerworld_all_profiles(session, "123")
+    assert errors == []
+    assert file_urls == {
+        101: "https://makerworld.com/models/123#profileId-11",
+        102: "https://makerworld.com/models/123#profileId-22",
+    }
+    assert mock_import.call_args_list[0].args[1] == "https://makerworld.com/models/123#profileId-11"
+    assert mock_import.call_args_list[1].args[1] == "https://makerworld.com/models/123#profileId-22"
+    assert session.post.call_args.kwargs["json"] == {"url": "https://makerworld.com/models/123"}
+
+
+def test_import_makerworld_all_profiles_dedupes_repeated_profile_ids():
+    session = MagicMock()
+    session.post.return_value = _mock_resolve_response(
+        True, instances=[{"id": 1, "profileId": 11}, {"id": 2, "profileId": 11}],
+    )
+    with patch(
+        "bambuddy_to_manyfold.import_makerworld_url",
+        return_value=(101, "https://makerworld.com/models/123#profileId-11", None),
+    ) as mock_import:
+        file_urls, errors = import_makerworld_all_profiles(session, "123")
+    assert errors == []
+    assert file_urls == {101: "https://makerworld.com/models/123#profileId-11"}
+    mock_import.assert_called_once()
+
+
+def test_import_makerworld_all_profiles_partial_failure_continues_batch():
+    """A per-plate import failure (matching handleImportAll's try/catch in
+    MakerworldPage.tsx) is skipped, not fatal to the rest of the batch.
+    """
+    session = MagicMock()
+    session.post.return_value = _mock_resolve_response(
+        True, instances=[{"id": 1, "profileId": 11}, {"id": 2, "profileId": 22}],
+    )
+    with patch(
+        "bambuddy_to_manyfold.import_makerworld_url",
+        side_effect=[
+            (None, None, "MakerWorld import failed for .../123#profileId-11: 502 bad gateway"),
+            (102, "https://makerworld.com/models/123#profileId-22", None),
+        ],
+    ) as mock_import:
+        file_urls, errors = import_makerworld_all_profiles(session, "123")
+    assert mock_import.call_count == 2  # the failure didn't abort the second plate
+    assert file_urls == {102: "https://makerworld.com/models/123#profileId-22"}
+    assert len(errors) == 1
+    assert "502 bad gateway" in errors[0]
+
+
+def test_import_makerworld_all_profiles_resolve_http_failure():
+    session = MagicMock()
+    session.post.return_value = _mock_resolve_response(False, status_code=404, text="not found")
+    with patch("bambuddy_to_manyfold.import_makerworld_url") as mock_import:
+        file_urls, errors = import_makerworld_all_profiles(session, "123")
+    assert file_urls == {}
+    assert len(errors) == 1
+    assert "404" in errors[0]
+    mock_import.assert_not_called()
+
+
+def test_import_makerworld_all_profiles_resolve_request_exception():
+    session = MagicMock()
+    session.post.side_effect = RuntimeError("connection reset")
+    file_urls, errors = import_makerworld_all_profiles(session, "123")
+    assert file_urls == {}
+    assert "connection reset" in errors[0]
+
+
+def test_import_makerworld_all_profiles_no_instances():
+    session = MagicMock()
+    session.post.return_value = _mock_resolve_response(True, instances=[])
+    with patch("bambuddy_to_manyfold.import_makerworld_url") as mock_import:
+        file_urls, errors = import_makerworld_all_profiles(session, "123")
+    assert file_urls == {}
+    assert "no importable profiles" in errors[0]
+    mock_import.assert_not_called()
+
+
 # ── sync_makerworld_urls ─────────────────────────────────────────────────────
 
 def test_sync_makerworld_urls_dedupes_and_syncs():
@@ -560,15 +668,17 @@ def test_sync_makerworld_urls_dedupes_and_syncs():
     with (
         patch(
             "bambuddy_to_manyfold.import_makerworld_url",
-            side_effect=[
-                (101, "https://makerworld.com/models/1#profileId-11", None),
-                (102, "https://makerworld.com/models/2#profileId-99", None),
-            ],
+            return_value=(101, "https://makerworld.com/models/1#profileId-11", None),
         ) as mock_import,
+        patch(
+            "bambuddy_to_manyfold.import_makerworld_all_profiles",
+            return_value=({102: "https://makerworld.com/models/2#profileId-99"}, []),
+        ) as mock_import_all,
         patch("bambuddy_to_manyfold.sync_library_files", return_value=2) as mock_sync,
     ):
         count = sync_makerworld_urls(MagicMock(), {}, set(), urls, dry_run=False)
-    assert mock_import.call_count == 2  # the duplicate never triggered a second import
+    assert mock_import.call_count == 1  # the duplicate never triggered a second import
+    mock_import_all.assert_called_once_with(mock_import.call_args.args[0], "2")
     assert count == 2
     kwargs = mock_sync.call_args.kwargs
     assert kwargs["selected_ids"] == {101, 102}
@@ -582,13 +692,13 @@ def test_sync_makerworld_urls_skips_invalid_lines_but_processes_rest():
     urls = ["not a url", "https://makerworld.com/models/1"]
     with (
         patch(
-            "bambuddy_to_manyfold.import_makerworld_url",
-            return_value=(101, "https://makerworld.com/models/1#profileId-11", None),
-        ) as mock_import,
+            "bambuddy_to_manyfold.import_makerworld_all_profiles",
+            return_value=({101: "https://makerworld.com/models/1#profileId-11"}, []),
+        ) as mock_import_all,
         patch("bambuddy_to_manyfold.sync_library_files", return_value=1),
     ):
         count = sync_makerworld_urls(MagicMock(), {}, set(), urls, dry_run=False)
-    mock_import.assert_called_once()
+    mock_import_all.assert_called_once()
     assert count == 1
 
 
@@ -596,10 +706,12 @@ def test_sync_makerworld_urls_dry_run_makes_no_import_calls():
     urls = ["https://makerworld.com/models/1", "https://makerworld.com/models/2"]
     with (
         patch("bambuddy_to_manyfold.import_makerworld_url") as mock_import,
+        patch("bambuddy_to_manyfold.import_makerworld_all_profiles") as mock_import_all,
         patch("bambuddy_to_manyfold.sync_library_files") as mock_sync,
     ):
         count = sync_makerworld_urls(MagicMock(), {}, set(), urls, dry_run=True)
     mock_import.assert_not_called()
+    mock_import_all.assert_not_called()
     mock_sync.assert_not_called()
     assert count == 2
 
@@ -608,10 +720,10 @@ def test_sync_makerworld_urls_partial_import_failure_still_syncs_successes():
     urls = ["https://makerworld.com/models/1", "https://makerworld.com/models/2"]
     with (
         patch(
-            "bambuddy_to_manyfold.import_makerworld_url",
+            "bambuddy_to_manyfold.import_makerworld_all_profiles",
             side_effect=[
-                (None, None, "MakerWorld import failed for .../1: 403 forbidden"),
-                (102, "https://makerworld.com/models/2#profileId-99", None),
+                ({}, ["MakerWorld design 1 has no importable profiles"]),
+                ({102: "https://makerworld.com/models/2#profileId-99"}, []),
             ],
         ),
         patch("bambuddy_to_manyfold.sync_library_files", return_value=1) as mock_sync,
@@ -623,7 +735,7 @@ def test_sync_makerworld_urls_partial_import_failure_still_syncs_successes():
 
 def test_sync_makerworld_urls_all_imports_fail_skips_sync():
     with (
-        patch("bambuddy_to_manyfold.import_makerworld_url", return_value=(None, None, "boom")),
+        patch("bambuddy_to_manyfold.import_makerworld_all_profiles", return_value=({}, ["boom"])),
         patch("bambuddy_to_manyfold.sync_library_files") as mock_sync,
     ):
         count = sync_makerworld_urls(MagicMock(), {}, set(), ["https://makerworld.com/models/1"], dry_run=False)
@@ -634,11 +746,13 @@ def test_sync_makerworld_urls_all_imports_fail_skips_sync():
 def test_sync_makerworld_urls_no_valid_urls_skips_everything():
     with (
         patch("bambuddy_to_manyfold.import_makerworld_url") as mock_import,
+        patch("bambuddy_to_manyfold.import_makerworld_all_profiles") as mock_import_all,
         patch("bambuddy_to_manyfold.sync_library_files") as mock_sync,
     ):
         count = sync_makerworld_urls(MagicMock(), {}, set(), ["garbage", ""], dry_run=False)
     assert count == 0
     mock_import.assert_not_called()
+    mock_import_all.assert_not_called()
     mock_sync.assert_not_called()
 
 
@@ -704,8 +818,8 @@ def test_sync_makerworld_urls_healthy_status_proceeds_normally():
             return_value={"has_cloud_token": True, "can_download": True, "sign_in_expired": False},
         ),
         patch(
-            "bambuddy_to_manyfold.import_makerworld_url",
-            return_value=(101, "https://makerworld.com/models/1#profileId-11", None),
+            "bambuddy_to_manyfold.import_makerworld_all_profiles",
+            return_value=({101: "https://makerworld.com/models/1#profileId-11"}, []),
         ),
         patch("bambuddy_to_manyfold.sync_library_files", return_value=1) as mock_sync,
     ):
@@ -722,8 +836,8 @@ def test_sync_makerworld_urls_status_check_failure_proceeds_normally():
     with (
         patch("bambuddy_to_manyfold.get_makerworld_status", return_value=None),
         patch(
-            "bambuddy_to_manyfold.import_makerworld_url",
-            return_value=(101, "https://makerworld.com/models/1#profileId-11", None),
+            "bambuddy_to_manyfold.import_makerworld_all_profiles",
+            return_value=({101: "https://makerworld.com/models/1#profileId-11"}, []),
         ),
         patch("bambuddy_to_manyfold.sync_library_files", return_value=1) as mock_sync,
     ):
