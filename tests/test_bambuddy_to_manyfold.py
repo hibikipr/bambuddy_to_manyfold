@@ -13,6 +13,7 @@ would otherwise touch the network mocked out.
 from unittest.mock import MagicMock, patch
 
 from bambuddy_to_manyfold import (
+    _clean_makerworld_url,
     _extract_makerworld_tags,
     _flatten_folders,
     _html_to_markdown,
@@ -140,6 +141,28 @@ def test_makerworld_profile_id_none_input():
 
 def test_makerworld_profile_id_no_fragment():
     assert _makerworld_profile_id("https://makerworld.com/models/123456") is None
+
+
+# ── _clean_makerworld_url ─────────────────────────────────────────────────────
+
+def test_clean_makerworld_url_strips_query_and_fragment():
+    url = (
+        "https://makerworld.com/en/models/2537021-mechanical-astro-boy-height-28cm-"
+        "no-ams-required?from=recommend#profileId-2792745"
+    )
+    assert _clean_makerworld_url(url) == (
+        "https://makerworld.com/en/models/2537021-mechanical-astro-boy-height-28cm-no-ams-required"
+    )
+
+
+def test_clean_makerworld_url_strips_bare_fragment():
+    assert _clean_makerworld_url("https://makerworld.com/models/1#profileId-11") == (
+        "https://makerworld.com/models/1"
+    )
+
+
+def test_clean_makerworld_url_leaves_bare_model_url_unchanged():
+    assert _clean_makerworld_url("https://makerworld.com/models/1") == "https://makerworld.com/models/1"
 
 
 # ── _flatten_folders ───────────────────────────────────────────────────────
@@ -660,25 +683,31 @@ def test_import_makerworld_all_profiles_no_instances():
 # ── sync_makerworld_urls ─────────────────────────────────────────────────────
 
 def test_sync_makerworld_urls_dedupes_and_syncs():
+    # Query strings and #profileId fragments are stripped before dedup (see
+    # _clean_makerworld_url), so every pasted URL — whatever plate/tracking
+    # info it carried — collapses to its bare model URL and always goes
+    # through the "import all profiles" path, never a single-profile import.
     urls = [
         "https://makerworld.com/models/1#profileId-11",
-        "https://makerworld.com/en/models/1#profileId-11",  # dup, different path prefix
+        "https://makerworld.com/en/models/1?from=recommend#profileId-11",  # dup, different path prefix
         "https://makerworld.com/models/2",
     ]
     with (
-        patch(
-            "bambuddy_to_manyfold.import_makerworld_url",
-            return_value=(101, "https://makerworld.com/models/1#profileId-11", None),
-        ) as mock_import,
+        patch("bambuddy_to_manyfold.import_makerworld_url") as mock_import,
         patch(
             "bambuddy_to_manyfold.import_makerworld_all_profiles",
-            return_value=({102: "https://makerworld.com/models/2#profileId-99"}, []),
+            side_effect=[
+                ({101: "https://makerworld.com/models/1#profileId-11"}, []),
+                ({102: "https://makerworld.com/models/2#profileId-99"}, []),
+            ],
         ) as mock_import_all,
         patch("bambuddy_to_manyfold.sync_library_files", return_value=2) as mock_sync,
     ):
         count = sync_makerworld_urls(MagicMock(), {}, set(), urls, dry_run=False)
-    assert mock_import.call_count == 1  # the duplicate never triggered a second import
-    mock_import_all.assert_called_once_with(mock_import.call_args.args[0], "2")
+    mock_import.assert_not_called()  # no explicit-profile import — fragments are stripped
+    assert mock_import_all.call_count == 2  # one call per unique model, dup collapsed
+    mock_import_all.assert_any_call(mock_import_all.call_args_list[0].args[0], "1")
+    mock_import_all.assert_any_call(mock_import_all.call_args_list[1].args[0], "2")
     assert count == 2
     kwargs = mock_sync.call_args.kwargs
     assert kwargs["selected_ids"] == {101, 102}
