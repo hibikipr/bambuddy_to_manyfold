@@ -1261,6 +1261,20 @@ def _poll_for_new_manyfold_model(
     return None
 
 
+def _clean_makerworld_url(url: str) -> str:
+    """Strip the query string and fragment off a pasted MakerWorld URL.
+
+    MakerWorld's "recommended"/"similar models" widgets share links like
+    ``.../models/123-slug?from=recommend#profileId-456`` where the fragment's
+    profileId belongs to whatever model the visitor came from, not this one —
+    pasting it as-is trips the "stale plate" error in import_makerworld_url.
+    Rather than have the user notice and manually retrim it, always drop the
+    query string and fragment here, so every pasted URL becomes a bare model
+    link and imports all of that model's print profiles.
+    """
+    return urlsplit(url)._replace(query="", fragment="").geturl()
+
+
 def _makerworld_model_id(source_url: str | None) -> str | None:
     """Extract the MakerWorld design id from a source URL.
 
@@ -1910,6 +1924,7 @@ def sync_makerworld_urls(
         line = line.strip()
         if not line:
             continue
+        line = _clean_makerworld_url(line)
         model_id = _makerworld_model_id(line)
         if model_id is None:
             print(f"  ⚠️  Skipping — not a recognisable MakerWorld model URL: {line}")
