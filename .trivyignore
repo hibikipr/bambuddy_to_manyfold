@@ -18,3 +18,7 @@
 GHSA-6v7p-g79w-8964
 CVE-2025-47273
 CVE-2026-59890
+# GHSA-xmj3-9gf7-h52w (setuptools 70.3.0, "fixed" in 84.1.0) is the same case: 70.3.0 is the version pip pins in its
+# own vendor.txt, and pip 26.3 (the newest release, checked 2026-11-18) still pins 70.3.0. Upgrading pip in the Dockerfile
+# did fix the msgpack and urllib3 findings, which pip vendors at fixed versions now, so those are not ignored.
+GHSA-xmj3-9gf7-h52w

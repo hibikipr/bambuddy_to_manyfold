@@ -1,3 +1,5 @@
 flask>=3.1.3
 requests>=2.34.2
+# Floor for requests' own dependency: 2.7.0 has three DoS/proxy CVEs fixed in 2.8.0 (CVE-2026-97687/97688/97689).
+urllib3>=2.8.0
 tqdm

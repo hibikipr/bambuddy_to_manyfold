@@ -15,6 +15,12 @@ ARG VERSION=dev
 
 WORKDIR /app
 
+# pip vendors its own copies of urllib3 and msgpack, and Trivy reports CVEs against them. The base image's pip lags:
+# 26.1.2 vendored urllib3 2.7.0 and msgpack 1.1.2, both with fixed releases. Upgrading pip first picks up the fixed
+# vendored copies on every build (26.3: urllib3 2.8.0, msgpack 1.2.4). Unpinned on purpose, like the apt upgrade above.
+# hadolint ignore=DL3013
+RUN pip install --no-cache-dir --upgrade pip
+
 # Deps first for layer caching. gunicorn serves the Flask app in production.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
