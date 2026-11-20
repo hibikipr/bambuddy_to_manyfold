@@ -58,6 +58,7 @@ t = _translator.t
 
 # ── App icon ──────────────────────────────────────────────────────────────────
 
+
 def _png_chunk(typ: bytes, data: bytes) -> bytes:
     return struct.pack(">I", len(data)) + typ + data + struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF)
 
@@ -103,24 +104,25 @@ def _make_icon_png(size: int = 64) -> bytes:
     raw = bytearray()
     for y in range(s):
         raw.append(0)  # filter type 0 per scanline
-        raw.extend(px[y * s * 4:(y + 1) * s * 4])
+        raw.extend(px[y * s * 4 : (y + 1) * s * 4])
     idat = zlib.compress(bytes(raw), 9)
     ihdr = struct.pack(">IIBBBBB", s, s, 8, 6, 0, 0, 0)  # 8-bit RGBA
     return b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", idat) + _png_chunk(b"IEND", b"")
+
 
 # ── Config persistence ────────────────────────────────────────────────────────
 
 GUI_CONFIG_FILE = Path.home() / ".bambuddy_to_manyfold_gui.json"
 
 FIELD_DEFAULTS = {
-    "bambuddy_url":           os.getenv("BAMBUDDY_URL",           "http://localhost:8000"),
-    "bambuddy_api_key":       os.getenv("BAMBUDDY_API_KEY",       ""),
-    "manyfold_url":           os.getenv("MANYFOLD_URL",           "http://localhost:3214"),
-    "manyfold_client_id":     os.getenv("MANYFOLD_CLIENT_ID",     ""),
+    "bambuddy_url": os.getenv("BAMBUDDY_URL", "http://localhost:8000"),
+    "bambuddy_api_key": os.getenv("BAMBUDDY_API_KEY", ""),
+    "manyfold_url": os.getenv("MANYFOLD_URL", "http://localhost:3214"),
+    "manyfold_client_id": os.getenv("MANYFOLD_CLIENT_ID", ""),
     "manyfold_client_secret": os.getenv("MANYFOLD_CLIENT_SECRET", ""),
-    "manyfold_token":         os.getenv("MANYFOLD_TOKEN",         ""),
-    "manyfold_library_id":    os.getenv("MANYFOLD_LIBRARY_ID",    "1"),
-    "sync_state_file":        os.getenv("SYNC_STATE_FILE",        "bambuddy_sync_state.json"),
+    "manyfold_token": os.getenv("MANYFOLD_TOKEN", ""),
+    "manyfold_library_id": os.getenv("MANYFOLD_LIBRARY_ID", "1"),
+    "sync_state_file": os.getenv("SYNC_STATE_FILE", "bambuddy_sync_state.json"),
 }
 
 
@@ -145,6 +147,7 @@ def save_gui_config(cfg: dict):
 
 # ── Stdout redirect ───────────────────────────────────────────────────────────
 
+
 class _QueueWriter(io.TextIOBase):
     """Forwards write() calls into a queue so the GUI thread can drain it."""
 
@@ -162,17 +165,17 @@ class _QueueWriter(io.TextIOBase):
 
 # ── Bambuddy theme palette (matches the web UI's Tailwind config) ─────────────
 
-BG          = "#1a1a1a"   # bambu-dark
-CARD        = "#2d2d2d"   # bambu-dark-secondary / card
-TERTIARY    = "#3d3d3d"   # bambu-dark-tertiary
-GREEN       = "#00ae42"   # bambu-green (primary accent)
+BG = "#1a1a1a"  # bambu-dark
+CARD = "#2d2d2d"  # bambu-dark-secondary / card
+TERTIARY = "#3d3d3d"  # bambu-dark-tertiary
+GREEN = "#00ae42"  # bambu-green (primary accent)
 GREEN_LIGHT = "#00c64d"
-GREEN_DARK  = "#009438"
-GRAY        = "#808080"
-GRAY_LIGHT  = "#a0a0a0"
-GRAY_DARK   = "#4a4a4a"
-FG          = "#e8e8e8"   # primary text
-DANGER      = "#e0533d"   # stop / destructive
+GREEN_DARK = "#009438"
+GRAY = "#808080"
+GRAY_LIGHT = "#a0a0a0"
+GRAY_DARK = "#4a4a4a"
+FG = "#e8e8e8"  # primary text
+DANGER = "#e0533d"  # stop / destructive
 
 
 def _get_version() -> str:
@@ -205,6 +208,7 @@ def _ui_font_family() -> str:
     """Prefer Inter (Bambuddy's font), else a sensible system sans-serif."""
     try:
         from tkinter import font as _f
+
         avail = set(_f.families())
         for fam in ("Inter", "SF Pro Text", "Helvetica Neue", "Segoe UI", "Arial"):
             if fam in avail:
@@ -216,7 +220,7 @@ def _ui_font_family() -> str:
 
 # ── Checkbox Treeview helper ──────────────────────────────────────────────────
 
-CHECK_ON  = "✓"
+CHECK_ON = "✓"
 CHECK_OFF = "☐"
 
 
@@ -240,14 +244,14 @@ class CheckTree:
             show="headings",
             selectmode="none",
         )
-        self._tree.heading("check",  text="")
-        self._tree.heading("name",   text=t("common.action.name"),   command=lambda: self._header_sort("name"))
-        self._tree.heading("date",   text=t("common.action.date"),   command=lambda: self._header_sort("date"))
+        self._tree.heading("check", text="")
+        self._tree.heading("name", text=t("common.action.name"), command=lambda: self._header_sort("name"))
+        self._tree.heading("date", text=t("common.action.date"), command=lambda: self._header_sort("date"))
         self._tree.heading("status", text=t("common.action.status"), command=lambda: self._header_sort("status"))
-        self._tree.column("check",  width=30,  stretch=False, anchor="center")
-        self._tree.column("name",   stretch=True,             anchor="w")
-        self._tree.column("date",   width=90,  stretch=False, anchor="center")
-        self._tree.column("status", width=70,  stretch=False, anchor="center")
+        self._tree.column("check", width=30, stretch=False, anchor="center")
+        self._tree.column("name", stretch=True, anchor="w")
+        self._tree.column("date", width=90, stretch=False, anchor="center")
+        self._tree.column("status", width=70, stretch=False, anchor="center")
 
         sb = ttk.Scrollbar(frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=sb.set)
@@ -259,7 +263,7 @@ class CheckTree:
 
         # iid → {name, date, status, checked}
         self._rows: dict[str, dict] = {}
-        self._order: list[str] = []          # insertion order
+        self._order: list[str] = []  # insertion order
         self._sort_key = "name"
         self._sort_reverse = False
         self._hide_synced = False
@@ -279,8 +283,7 @@ class CheckTree:
     def render(self):
         """Rebuild the visible tree from the data model (applies sort + filter)."""
         self._tree.delete(*self._tree.get_children())
-        visible = [iid for iid in self._order
-                   if not (self._hide_synced and self._rows[iid]["status"] == "synced")]
+        visible = [iid for iid in self._order if not (self._hide_synced and self._rows[iid]["status"] == "synced")]
 
         def key(iid):
             r = self._rows[iid]
@@ -295,9 +298,10 @@ class CheckTree:
             r = self._rows[iid]
             tags = ("synced",) if r["status"] == "synced" else ()
             self._tree.insert(
-                "", "end", iid=iid,
-                values=(CHECK_ON if r["checked"] else CHECK_OFF, r["name"],
-                        self._fmt_date(r["date"]), r["status"]),
+                "",
+                "end",
+                iid=iid,
+                values=(CHECK_ON if r["checked"] else CHECK_OFF, r["name"], self._fmt_date(r["date"]), r["status"]),
                 tags=tags,
             )
 
@@ -349,6 +353,7 @@ class CheckTree:
 
 # ── Main window ───────────────────────────────────────────────────────────────
 
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -384,9 +389,17 @@ class App(tk.Tk):
         except tk.TclError:
             pass
 
-        style.configure(".", background=BG, foreground=FG, font=self._font,
-                        fieldbackground=CARD, bordercolor=GRAY_DARK,
-                        lightcolor=CARD, darkcolor=CARD, troughcolor=CARD)
+        style.configure(
+            ".",
+            background=BG,
+            foreground=FG,
+            font=self._font,
+            fieldbackground=CARD,
+            bordercolor=GRAY_DARK,
+            lightcolor=CARD,
+            darkcolor=CARD,
+            troughcolor=CARD,
+        )
         style.configure("TFrame", background=BG)
         style.configure("TLabel", background=BG, foreground=FG)
         style.configure("Muted.TLabel", background=BG, foreground=GRAY_LIGHT)
@@ -394,29 +407,47 @@ class App(tk.Tk):
         style.configure("TLabelframe.Label", background=BG, foreground=GREEN_LIGHT, font=self._font_bold)
 
         # Buttons
-        style.configure("TButton", background=TERTIARY, foreground=FG,
-                        bordercolor=GRAY_DARK, focuscolor=BG, padding=(10, 5), relief="flat")
-        style.map("TButton",
-                  background=[("active", GRAY_DARK), ("disabled", CARD)],
-                  foreground=[("disabled", GRAY)])
+        style.configure(
+            "TButton",
+            background=TERTIARY,
+            foreground=FG,
+            bordercolor=GRAY_DARK,
+            focuscolor=BG,
+            padding=(10, 5),
+            relief="flat",
+        )
+        style.map("TButton", background=[("active", GRAY_DARK), ("disabled", CARD)], foreground=[("disabled", GRAY)])
         # Primary (green) action buttons
-        style.configure("Accent.TButton", background=GREEN, foreground="#0a0a0a",
-                        font=self._font_bold, padding=(12, 6), relief="flat")
-        style.map("Accent.TButton",
-                  background=[("active", GREEN_LIGHT), ("disabled", GREEN_DARK)],
-                  foreground=[("disabled", "#5a5a5a")])
+        style.configure(
+            "Accent.TButton",
+            background=GREEN,
+            foreground="#0a0a0a",
+            font=self._font_bold,
+            padding=(12, 6),
+            relief="flat",
+        )
+        style.map(
+            "Accent.TButton",
+            background=[("active", GREEN_LIGHT), ("disabled", GREEN_DARK)],
+            foreground=[("disabled", "#5a5a5a")],
+        )
         # Stop button (muted danger)
         style.configure("Danger.TButton", background=TERTIARY, foreground=DANGER, relief="flat")
         style.map("Danger.TButton", background=[("active", GRAY_DARK)])
 
         # Inputs
-        style.configure("TEntry", fieldbackground=CARD, foreground=FG,
-                        insertcolor=FG, bordercolor=GRAY_DARK, padding=4)
+        style.configure("TEntry", fieldbackground=CARD, foreground=FG, insertcolor=FG, bordercolor=GRAY_DARK, padding=4)
         style.map("TEntry", bordercolor=[("focus", GREEN)])
-        style.configure("TCombobox", fieldbackground=CARD, background=TERTIARY,
-                        foreground=FG, arrowcolor=FG, bordercolor=GRAY_DARK, padding=4)
-        style.map("TCombobox", fieldbackground=[("readonly", CARD)],
-                  foreground=[("readonly", FG)])
+        style.configure(
+            "TCombobox",
+            fieldbackground=CARD,
+            background=TERTIARY,
+            foreground=FG,
+            arrowcolor=FG,
+            bordercolor=GRAY_DARK,
+            padding=4,
+        )
+        style.map("TCombobox", fieldbackground=[("readonly", CARD)], foreground=[("readonly", FG)])
         # Combobox dropdown list colours (classic-Tk option DB)
         self.option_add("*TCombobox*Listbox.background", CARD)
         self.option_add("*TCombobox*Listbox.foreground", FG)
@@ -425,35 +456,35 @@ class App(tk.Tk):
 
         # Checkbuttons
         style.configure("TCheckbutton", background=BG, foreground=FG, focuscolor=BG)
-        style.map("TCheckbutton",
-                  background=[("active", BG)],
-                  indicatorcolor=[("selected", GREEN), ("!selected", CARD)],
-                  foreground=[("disabled", GRAY)])
+        style.map(
+            "TCheckbutton",
+            background=[("active", BG)],
+            indicatorcolor=[("selected", GREEN), ("!selected", CARD)],
+            foreground=[("disabled", GRAY)],
+        )
 
         # Treeview (the model lists)
-        style.configure("Treeview", background=CARD, fieldbackground=CARD,
-                        foreground=FG, bordercolor=GRAY_DARK, rowheight=24)
-        style.map("Treeview",
-                  background=[("selected", GREEN_DARK)],
-                  foreground=[("selected", "#ffffff")])
-        style.configure("Treeview.Heading", background=TERTIARY, foreground=FG,
-                        font=self._font_bold, relief="flat")
+        style.configure(
+            "Treeview", background=CARD, fieldbackground=CARD, foreground=FG, bordercolor=GRAY_DARK, rowheight=24
+        )
+        style.map("Treeview", background=[("selected", GREEN_DARK)], foreground=[("selected", "#ffffff")])
+        style.configure("Treeview.Heading", background=TERTIARY, foreground=FG, font=self._font_bold, relief="flat")
         style.map("Treeview.Heading", background=[("active", GRAY_DARK)])
 
         # Scrollbar / progress / separator
-        style.configure("Vertical.TScrollbar", background=TERTIARY,
-                        troughcolor=BG, bordercolor=BG, arrowcolor=FG)
+        style.configure("Vertical.TScrollbar", background=TERTIARY, troughcolor=BG, bordercolor=BG, arrowcolor=FG)
         style.configure("Horizontal.TProgressbar", background=GREEN, troughcolor=CARD, bordercolor=BG)
         style.configure("TSeparator", background=GRAY_DARK)
 
         # Notebook (Archives / Library tabs)
         style.configure("TNotebook", background=BG, bordercolor=GRAY_DARK, tabmargins=(2, 4, 2, 0))
-        style.configure("TNotebook.Tab", background=CARD, foreground=GRAY_LIGHT,
-                        padding=(16, 7), font=self._font)
-        style.map("TNotebook.Tab",
-                  background=[("selected", TERTIARY)],
-                  foreground=[("selected", GREEN_LIGHT)],
-                  expand=[("selected", (1, 1, 1, 0))])
+        style.configure("TNotebook.Tab", background=CARD, foreground=GRAY_LIGHT, padding=(16, 7), font=self._font)
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", TERTIARY)],
+            foreground=[("selected", GREEN_LIGHT)],
+            expand=[("selected", (1, 1, 1, 0))],
+        )
 
     def _set_app_icon(self):
         """Set the window icon to a generated 3D-cube graphic (best-effort)."""
@@ -476,7 +507,9 @@ class App(tk.Tk):
         footer = ttk.Frame(self)
         footer.pack(side="bottom", fill="x", padx=10, pady=(0, 6))
         ttk.Label(
-            footer, text=APP_VERSION, style="Muted.TLabel",
+            footer,
+            text=APP_VERSION,
+            style="Muted.TLabel",
             font=(self._font[0], 9),
         ).pack(side="right")
 
@@ -486,14 +519,14 @@ class App(tk.Tk):
         cfg_frame.columnconfigure(1, weight=1)
 
         fields = [
-            (t("common.field.bambuddy_url"),            "bambuddy_url",           False),
-            (t("common.field.bambuddy_api_key"),        "bambuddy_api_key",       True),
-            (t("common.field.manyfold_url"),            "manyfold_url",           False),
-            (t("common.field.manyfold_client_id"),      "manyfold_client_id",     True),
-            (t("common.field.manyfold_client_secret"),  "manyfold_client_secret", True),
-            (t("gui.manyfold_token"),                   "manyfold_token",         True),
-            (t("common.field.manyfold_library_id"),     "manyfold_library_id",    False),
-            (t("common.field.sync_state_file"),         "sync_state_file",        False),
+            (t("common.field.bambuddy_url"), "bambuddy_url", False),
+            (t("common.field.bambuddy_api_key"), "bambuddy_api_key", True),
+            (t("common.field.manyfold_url"), "manyfold_url", False),
+            (t("common.field.manyfold_client_id"), "manyfold_client_id", True),
+            (t("common.field.manyfold_client_secret"), "manyfold_client_secret", True),
+            (t("gui.manyfold_token"), "manyfold_token", True),
+            (t("common.field.manyfold_library_id"), "manyfold_library_id", False),
+            (t("common.field.sync_state_file"), "sync_state_file", False),
         ]
 
         self._vars: dict[str, tk.StringVar] = {}
@@ -501,9 +534,7 @@ class App(tk.Tk):
         self._show_vars: dict[str, tk.BooleanVar] = {}
 
         for row, (label, key, secret) in enumerate(fields):
-            ttk.Label(cfg_frame, text=label + ":").grid(
-                row=row, column=0, sticky="e", padx=(8, 4), pady=3
-            )
+            ttk.Label(cfg_frame, text=label + ":").grid(row=row, column=0, sticky="e", padx=(8, 4), pady=3)
             var = tk.StringVar()
             self._vars[key] = var
             show = "*" if secret else ""
@@ -515,13 +546,16 @@ class App(tk.Tk):
                 show_var = tk.BooleanVar(value=False)
                 self._show_vars[key] = show_var
                 ttk.Checkbutton(
-                    cfg_frame, text=t("common.field.show"),
+                    cfg_frame,
+                    text=t("common.field.show"),
                     variable=show_var,
                     command=lambda e=entry, v=show_var: e.configure(show="" if v.get() else "*"),
                 ).grid(row=row, column=2, padx=(0, 8), pady=3)
             elif key == "sync_state_file":
                 ttk.Button(
-                    cfg_frame, text=t("gui.browse"), width=8,
+                    cfg_frame,
+                    text=t("gui.browse"),
+                    width=8,
                     command=self._browse_state_file,
                 ).grid(row=row, column=2, padx=(0, 8), pady=3)
 
@@ -530,41 +564,39 @@ class App(tk.Tk):
         top_btn_frame.pack(fill="x", padx=10, pady=(0, 4))
 
         self._dry_run_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            top_btn_frame, text=t("common.option.dry_run"), variable=self._dry_run_var
-        ).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(top_btn_frame, text=t("common.option.dry_run"), variable=self._dry_run_var).pack(
+            side="left", padx=(0, 12)
+        )
 
         self._create_missing_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            top_btn_frame, text=t("gui.opt_create_missing"), variable=self._create_missing_var
-        ).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(top_btn_frame, text=t("gui.opt_create_missing"), variable=self._create_missing_var).pack(
+            side="left", padx=(0, 12)
+        )
 
         self._force_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            top_btn_frame, text=t("gui.opt_force"), variable=self._force_var
-        ).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(top_btn_frame, text=t("gui.opt_force"), variable=self._force_var).pack(
+            side="left", padx=(0, 12)
+        )
 
         self._links_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            top_btn_frame, text=t("common.option.add_links"), variable=self._links_var
-        ).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(top_btn_frame, text=t("common.option.add_links"), variable=self._links_var).pack(
+            side="left", padx=(0, 12)
+        )
 
         self._enrich_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            top_btn_frame, text=t("gui.opt_enrich"),
-            variable=self._enrich_var
-        ).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(top_btn_frame, text=t("gui.opt_enrich"), variable=self._enrich_var).pack(
+            side="left", padx=(0, 12)
+        )
 
         self._group_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            top_btn_frame, text=t("gui.opt_group"),
-            variable=self._group_var
-        ).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(top_btn_frame, text=t("gui.opt_group"), variable=self._group_var).pack(
+            side="left", padx=(0, 12)
+        )
 
         self._debug_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            top_btn_frame, text=t("common.option.debug"), variable=self._debug_var
-        ).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(top_btn_frame, text=t("common.option.debug"), variable=self._debug_var).pack(
+            side="left", padx=(0, 12)
+        )
 
         self._load_btn = ttk.Button(
             top_btn_frame, text=t("gui.load_models_button"), command=self._start_load, style="Accent.TButton"
@@ -572,25 +604,27 @@ class App(tk.Tk):
         self._load_btn.pack(side="left", padx=(0, 6))
 
         self._run_btn = ttk.Button(
-            top_btn_frame, text=t("gui.run_sync_button"), command=self._start_sync,
-            state="disabled", style="Accent.TButton"
+            top_btn_frame,
+            text=t("gui.run_sync_button"),
+            command=self._start_sync,
+            state="disabled",
+            style="Accent.TButton",
         )
         self._run_btn.pack(side="left", padx=(0, 6))
 
         self._stop_btn = ttk.Button(
-            top_btn_frame, text=t("gui.stop_button"), command=self._request_stop,
-            state="disabled", style="Danger.TButton"
+            top_btn_frame,
+            text=t("gui.stop_button"),
+            command=self._request_stop,
+            state="disabled",
+            style="Danger.TButton",
         )
         self._stop_btn.pack(side="left", padx=(0, 6))
 
-        self._cleanup_btn = ttk.Button(
-            top_btn_frame, text=t("gui.cleanup_button"), command=self._start_cleanup
-        )
+        self._cleanup_btn = ttk.Button(top_btn_frame, text=t("gui.cleanup_button"), command=self._start_cleanup)
         self._cleanup_btn.pack(side="left")
 
-        ttk.Button(
-            top_btn_frame, text=t("common.action.clear_log"), command=self._clear_log
-        ).pack(side="right")
+        ttk.Button(top_btn_frame, text=t("common.action.clear_log"), command=self._clear_log).pack(side="right")
 
         # ── Progress bar ──────────────────────────────────────────────────────
         self._progress = ttk.Progressbar(self, mode="indeterminate")
@@ -618,7 +652,10 @@ class App(tk.Tk):
         ttk.Label(view_bar, text=t("common.action.sort_by")).pack(side="left")
         self._sort_var = tk.StringVar(value=t("common.action.name"))
         sort_combo = ttk.Combobox(
-            view_bar, textvariable=self._sort_var, state="readonly", width=10,
+            view_bar,
+            textvariable=self._sort_var,
+            state="readonly",
+            width=10,
             values=tuple(self._SORT_LABEL_TO_KEY),
         )
         sort_combo.pack(side="left", padx=(4, 6))
@@ -626,13 +663,17 @@ class App(tk.Tk):
 
         self._sort_desc_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            view_bar, text=t("common.action.descending"), variable=self._sort_desc_var,
+            view_bar,
+            text=t("common.action.descending"),
+            variable=self._sort_desc_var,
             command=self._apply_view,
         ).pack(side="left", padx=(0, 12))
 
         self._hide_synced_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            view_bar, text=t("common.action.hide_synced"), variable=self._hide_synced_var,
+            view_bar,
+            text=t("common.action.hide_synced"),
+            variable=self._hide_synced_var,
             command=self._apply_view,
         ).pack(side="left")
 
@@ -644,19 +685,18 @@ class App(tk.Tk):
             tab = ttk.Frame(self._notebook)
             hdr = ttk.Frame(tab)
             hdr.pack(fill="x", padx=2, pady=(4, 2))
-            ttk.Button(hdr, text=t("common.action.select_all"),  command=all_cmd).pack(side="right", padx=(4, 0))
+            ttk.Button(hdr, text=t("common.action.select_all"), command=all_cmd).pack(side="right", padx=(4, 0))
             ttk.Button(hdr, text=t("common.action.select_none"), command=none_cmd).pack(side="right")
-            ttk.Label(hdr, text=t("gui.click_row_hint"),
-                      style="Muted.TLabel").pack(side="left")
+            ttk.Label(hdr, text=t("gui.click_row_hint"), style="Muted.TLabel").pack(side="left")
             tree = CheckTree(tab)
             return tab, tree
 
         arch_tab, self._arch_tree = _make_tab(
-            lambda: self._arch_tree.set_all(True), lambda: self._arch_tree.set_all(False))
-        lib_tab, self._lib_tree = _make_tab(
-            lambda: self._lib_tree.set_all(True), lambda: self._lib_tree.set_all(False))
+            lambda: self._arch_tree.set_all(True), lambda: self._arch_tree.set_all(False)
+        )
+        lib_tab, self._lib_tree = _make_tab(lambda: self._lib_tree.set_all(True), lambda: self._lib_tree.set_all(False))
         self._notebook.add(arch_tab, text=t("common.action.archives_tab"))
-        self._notebook.add(lib_tab,  text=t("common.action.library_tab"))
+        self._notebook.add(lib_tab, text=t("common.action.library_tab"))
         self._arch_tab, self._lib_tab = arch_tab, lib_tab
 
         # ── Log pane ──────────────────────────────────────────────────────────
@@ -665,15 +705,21 @@ class App(tk.Tk):
 
         mono = font.Font(family="Menlo", size=10)
         self._log = scrolledtext.ScrolledText(
-            log_frame, state="disabled", wrap="word",
-            font=mono, background=BG, foreground=FG,
-            insertbackground=FG, borderwidth=0, highlightthickness=0,
+            log_frame,
+            state="disabled",
+            wrap="word",
+            font=mono,
+            background=BG,
+            foreground=FG,
+            insertbackground=FG,
+            borderwidth=0,
+            highlightthickness=0,
         )
         self._log.pack(fill="both", expand=True, padx=4, pady=4)
 
-        self._log.tag_config("ok",   foreground=GREEN_LIGHT)
+        self._log.tag_config("ok", foreground=GREEN_LIGHT)
         self._log.tag_config("warn", foreground="#e0a800")
-        self._log.tag_config("err",  foreground=DANGER)
+        self._log.tag_config("err", foreground=DANGER)
         self._log.tag_config("info", foreground=GRAY_LIGHT)
 
     # ── Field helpers ─────────────────────────────────────────────────────────
@@ -746,15 +792,15 @@ class App(tk.Tk):
         return cfg
 
     def _set_env(self, cfg: dict):
-        os.environ["BAMBUDDY_URL"]            = cfg["bambuddy_url"]
-        os.environ["BAMBUDDY_API_KEY"]        = cfg["bambuddy_api_key"]
-        os.environ["MANYFOLD_URL"]            = cfg["manyfold_url"]
-        os.environ["MANYFOLD_CLIENT_ID"]      = cfg["manyfold_client_id"]
-        os.environ["MANYFOLD_CLIENT_SECRET"]  = cfg["manyfold_client_secret"]
-        os.environ["MANYFOLD_TOKEN"]          = cfg["manyfold_token"]
-        os.environ["MANYFOLD_LIBRARY_ID"]     = cfg["manyfold_library_id"]
-        os.environ["SYNC_STATE_FILE"]         = cfg["sync_state_file"]
-        os.environ["MANYFOLD_SYNC_DEBUG"]     = "1" if self._debug_var.get() else "0"
+        os.environ["BAMBUDDY_URL"] = cfg["bambuddy_url"]
+        os.environ["BAMBUDDY_API_KEY"] = cfg["bambuddy_api_key"]
+        os.environ["MANYFOLD_URL"] = cfg["manyfold_url"]
+        os.environ["MANYFOLD_CLIENT_ID"] = cfg["manyfold_client_id"]
+        os.environ["MANYFOLD_CLIENT_SECRET"] = cfg["manyfold_client_secret"]
+        os.environ["MANYFOLD_TOKEN"] = cfg["manyfold_token"]
+        os.environ["MANYFOLD_LIBRARY_ID"] = cfg["manyfold_library_id"]
+        os.environ["SYNC_STATE_FILE"] = cfg["sync_state_file"]
+        os.environ["MANYFOLD_SYNC_DEBUG"] = "1" if self._debug_var.get() else "0"
 
     # ── Load models ───────────────────────────────────────────────────────────
 
@@ -775,6 +821,7 @@ class App(tk.Tk):
 
         import importlib
         import bambuddy_to_manyfold as sync_mod
+
         importlib.reload(sync_mod)
 
         writer = _QueueWriter(self._log_queue)
@@ -789,6 +836,7 @@ class App(tk.Tk):
         try:
             import datetime
             import requests as _requests
+
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"\n{'─' * 60}")
             print(f"  ⟳  {t('log.loading_models_banner')} at {ts}")
@@ -800,9 +848,9 @@ class App(tk.Tk):
             # Load sync state to mark already-synced items
             state = sync_mod.load_sync_state()
             synced_archive_ids = set(state.get("synced_archives", []))
-            synced_file_ids    = set(state.get("synced_library_files", []))
+            synced_file_ids = set(state.get("synced_library_files", []))
 
-            archives  = sync_mod.get_bambuddy_archives(session)
+            archives = sync_mod.get_bambuddy_archives(session)
             lib_files = sync_mod.get_bambuddy_library_files(session)
 
             # Enrich library files with folder path for display
@@ -830,9 +878,7 @@ class App(tk.Tk):
             sys.stderr = old_err
             self.after(
                 0,
-                lambda: self._load_done(
-                    archives, lib_files, synced_archive_ids, synced_file_ids
-                ),
+                lambda: self._load_done(archives, lib_files, synced_archive_ids, synced_file_ids),
             )
 
     def _load_done(
@@ -848,7 +894,7 @@ class App(tk.Tk):
         self._cleanup_btn.configure(state="normal")
         self._stop_btn.configure(state="disabled")
 
-        self._archives  = archives
+        self._archives = archives
         self._lib_files = lib_files
 
         STRIP_EXTS = {".gcode", ".3mf", ".stl", ".obj", ".step", ".stp"}
@@ -856,39 +902,37 @@ class App(tk.Tk):
         # Populate archives tree
         self._arch_tree.clear()
         for a in archives:
-            aid   = a.get("id")
-            name  = a.get("name") or a.get("filename", f"archive_{aid}")
-            stem  = name
+            aid = a.get("id")
+            name = a.get("name") or a.get("filename", f"archive_{aid}")
+            stem = name
             while Path(stem).suffix.lower() in STRIP_EXTS:
                 stem = Path(stem).stem
-            status  = "synced" if aid in synced_archive_ids else "new"
+            status = "synced" if aid in synced_archive_ids else "new"
             checked = status != "synced"
-            date    = a.get("created_at") or a.get("created") or ""
+            date = a.get("created_at") or a.get("created") or ""
             self._arch_tree.add_row(str(aid), stem, status, checked, date=date)
 
         arch_synced = sum(1 for a in archives if a.get("id") in synced_archive_ids)
-        self._notebook.tab(self._arch_tab,
-                           text=t("gui.archives_tab_counted", total=len(archives), synced=arch_synced))
+        self._notebook.tab(self._arch_tab, text=t("gui.archives_tab_counted", total=len(archives), synced=arch_synced))
 
         # Populate library files tree (supported extensions only)
         supported_extensions = {".3mf", ".stl", ".obj", ".step", ".stp"}
         supported = [
-            lf for lf in lib_files
-            if Path(lf.get("filename") or lf.get("name", "")).suffix.lower()
-            in supported_extensions
+            lf
+            for lf in lib_files
+            if Path(lf.get("filename") or lf.get("name", "")).suffix.lower() in supported_extensions
         ]
         self._lib_tree.clear()
         for lf in supported:
-            fid     = lf.get("id")
+            fid = lf.get("id")
             display = lf.get("_display_name", f"file_{fid}")
-            status  = "synced" if fid in synced_file_ids else "new"
+            status = "synced" if fid in synced_file_ids else "new"
             checked = status != "synced"
-            date    = lf.get("created_at") or lf.get("created") or ""
+            date = lf.get("created_at") or lf.get("created") or ""
             self._lib_tree.add_row(str(fid), display, status, checked, date=date)
 
         lib_synced = sum(1 for lf in supported if lf.get("id") in synced_file_ids)
-        self._notebook.tab(self._lib_tab,
-                           text=t("gui.library_tab_counted", total=len(supported), synced=lib_synced))
+        self._notebook.tab(self._lib_tab, text=t("gui.library_tab_counted", total=len(supported), synced=lib_synced))
 
         # Apply the current sort/filter and render both trees.
         self._apply_view()
@@ -919,7 +963,7 @@ class App(tk.Tk):
             return
 
         selected_archive_ids = {int(iid) for iid in self._arch_tree.checked_iids()}
-        selected_file_ids    = {int(iid) for iid in self._lib_tree.checked_iids()}
+        selected_file_ids = {int(iid) for iid in self._lib_tree.checked_iids()}
 
         if not selected_archive_ids and not selected_file_ids:
             messagebox.showinfo(t("gui.nothing_selected_title"), t("gui.nothing_selected_message"))
@@ -942,7 +986,17 @@ class App(tk.Tk):
 
         threading.Thread(
             target=self._sync_worker,
-            args=(cfg, dry_run, create_missing, force, add_links, enrich, group, selected_archive_ids, selected_file_ids),
+            args=(
+                cfg,
+                dry_run,
+                create_missing,
+                force,
+                add_links,
+                enrich,
+                group,
+                selected_archive_ids,
+                selected_file_ids,
+            ),
             daemon=True,
         ).start()
 
@@ -981,12 +1035,17 @@ class App(tk.Tk):
         collection = collection.strip()
 
         dry_run = self._dry_run_var.get()
-        scope = t("gui.all_collections") if collection.upper() == "ALL" else t("gui.collection_named", collection=collection)
+        scope = (
+            t("gui.all_collections")
+            if collection.upper() == "ALL"
+            else t("gui.collection_named", collection=collection)
+        )
         if not dry_run:
             if not messagebox.askyesno(
                 t("gui.confirm_deletion_title"),
                 t("gui.confirm_deletion_message", scope=scope),
-                icon="warning", parent=self,
+                icon="warning",
+                parent=self,
             ):
                 return
         else:
@@ -998,15 +1057,14 @@ class App(tk.Tk):
         self._cleanup_btn.configure(state="disabled")
         self._stop_btn.configure(state="disabled")
         self._progress.start(12)
-        threading.Thread(
-            target=self._cleanup_worker, args=(cfg, collection, dry_run), daemon=True
-        ).start()
+        threading.Thread(target=self._cleanup_worker, args=(cfg, collection, dry_run), daemon=True).start()
 
     def _cleanup_worker(self, cfg: dict, collection: str, dry_run: bool):
         self._set_env(cfg)
 
         import importlib
         import bambuddy_to_manyfold as sync_mod
+
         importlib.reload(sync_mod)
 
         writer = _QueueWriter(self._log_queue)
@@ -1016,6 +1074,7 @@ class App(tk.Tk):
         try:
             import datetime
             import requests as _requests
+
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             tag = f"  [{t('log.dry_run_tag')}]" if dry_run else ""
             print(f"\n{'─' * 60}")
@@ -1066,6 +1125,7 @@ class App(tk.Tk):
 
         import importlib
         import bambuddy_to_manyfold as sync_mod
+
         importlib.reload(sync_mod)
 
         writer = _QueueWriter(self._log_queue)
@@ -1077,6 +1137,7 @@ class App(tk.Tk):
             import time
 
             import datetime
+
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             tag = f"  [{t('log.dry_run_tag')}]" if dry_run else ""
             print(f"\n{'─' * 60}")
@@ -1086,13 +1147,16 @@ class App(tk.Tk):
             session = _requests.Session()
             sync_mod.check_connections(session)
 
-            state          = sync_mod.load_sync_state()
+            state = sync_mod.load_sync_state()
             existing_names = sync_mod.get_existing_manyfold_models(session)
             print(f"  ℹ️  {t('log.existing_models_found', count=len(existing_names))}\n")
 
             start = time.time()
             archives_added = sync_mod.sync_archives(
-                session, state, existing_names, dry_run,
+                session,
+                state,
+                existing_names,
+                dry_run,
                 selected_ids=selected_archive_ids,
                 create_missing=create_missing,
                 force=force,
@@ -1102,7 +1166,10 @@ class App(tk.Tk):
                 print(f"\n⚠️  {t('log.stopped_before_library')}\n")
             else:
                 library_added = sync_mod.sync_library_files(
-                    session, state, existing_names, dry_run,
+                    session,
+                    state,
+                    existing_names,
+                    dry_run,
                     selected_ids=selected_file_ids,
                     create_missing=create_missing,
                     force=force,

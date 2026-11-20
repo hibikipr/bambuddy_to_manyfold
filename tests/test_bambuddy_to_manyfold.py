@@ -34,6 +34,7 @@ from bambuddy_to_manyfold import (
 
 # ── _slugify ───────────────────────────────────────────────────────────────
 
+
 def test_slugify_basic():
     assert _slugify("Jane Doe") == "jane-doe"
 
@@ -53,6 +54,7 @@ def test_slugify_is_deterministic():
 
 
 # ── _html_to_markdown ──────────────────────────────────────────────────────
+
 
 def test_html_to_markdown_none_input():
     assert _html_to_markdown(None) is None
@@ -83,6 +85,7 @@ def test_html_to_markdown_collapses_blank_lines():
 
 # ── _extract_makerworld_tags ───────────────────────────────────────────────
 
+
 def test_extract_tags_from_strings():
     assert _extract_makerworld_tags({"tags": ["Cute", " Robot ", ""]}) == ["Cute", "Robot"]
 
@@ -99,6 +102,7 @@ def test_extract_tags_missing_or_wrong_type():
 
 # ── _image_ext_from_url ────────────────────────────────────────────────────
 
+
 def test_image_ext_known_types():
     assert _image_ext_from_url("https://cdn.example.com/cover.jpg") == ".jpg"
     assert _image_ext_from_url("https://cdn.example.com/cover.WEBP") == ".webp"
@@ -110,6 +114,7 @@ def test_image_ext_defaults_to_png():
 
 
 # ── _makerworld_model_id ───────────────────────────────────────────────────
+
 
 def test_makerworld_model_id_extracts_design_id():
     url = "https://makerworld.com/en/models/123456#profileId-789"
@@ -125,6 +130,7 @@ def test_makerworld_model_id_no_match():
 
 
 # ── _makerworld_profile_id ───────────────────────────────────────────────────
+
 
 def test_makerworld_profile_id_extracts_id():
     url = "https://makerworld.com/en/models/123456#profileId-789"
@@ -145,6 +151,7 @@ def test_makerworld_profile_id_no_fragment():
 
 # ── _clean_makerworld_url ─────────────────────────────────────────────────────
 
+
 def test_clean_makerworld_url_strips_query_and_fragment():
     url = (
         "https://makerworld.com/en/models/2537021-mechanical-astro-boy-height-28cm-"
@@ -156,9 +163,7 @@ def test_clean_makerworld_url_strips_query_and_fragment():
 
 
 def test_clean_makerworld_url_strips_bare_fragment():
-    assert _clean_makerworld_url("https://makerworld.com/models/1#profileId-11") == (
-        "https://makerworld.com/models/1"
-    )
+    assert _clean_makerworld_url("https://makerworld.com/models/1#profileId-11") == ("https://makerworld.com/models/1")
 
 
 def test_clean_makerworld_url_leaves_bare_model_url_unchanged():
@@ -167,13 +172,22 @@ def test_clean_makerworld_url_leaves_bare_model_url_unchanged():
 
 # ── _flatten_folders ───────────────────────────────────────────────────────
 
+
 def test_flatten_folders_nested():
     tree = [
-        {"id": 1, "name": "Root", "children": [
-            {"id": 2, "name": "Child", "children": [
-                {"id": 3, "name": "Grandchild", "children": []},
-            ]},
-        ]},
+        {
+            "id": 1,
+            "name": "Root",
+            "children": [
+                {
+                    "id": 2,
+                    "name": "Child",
+                    "children": [
+                        {"id": 3, "name": "Grandchild", "children": []},
+                    ],
+                },
+            ],
+        },
     ]
     flat = _flatten_folders(tree)
     paths = {f["id"]: f["_full_path"] for f in flat}
@@ -231,7 +245,10 @@ def _run_group_sync(state: dict, existing_names: set):
         patch("bambuddy_to_manyfold.apply_makerworld_extras") as mock_enrich,
     ):
         sync_library_files(
-            MagicMock(), state, existing_names, dry_run=False,
+            MagicMock(),
+            state,
+            existing_names,
+            dry_run=False,
         )
         mock_create.assert_not_called()  # sanity: this test is the reuse-by-name path
         return mock_enrich
@@ -264,6 +281,7 @@ def test_group_already_tracked_does_not_re_enrich():
 # ever accepted 202 — every new-model creation was silently treated as a
 # failure, so no model (and therefore no MakerWorld enrichment/cover image)
 # was ever created for a new design.
+
 
 def _mock_response(status_code, location=None):
     resp = MagicMock()
@@ -301,8 +319,13 @@ def test_create_model_from_upload_201_uses_location_directly():
         patch("bambuddy_to_manyfold.enrich_manyfold_model_from_makerworld") as mock_enrich,
     ):
         ok = create_manyfold_model_from_upload(
-            session, "My Model", "https://manyfold.example.com/upload/xyz", "model.3mf",
-            source_url="https://makerworld.com/models/1", source_text="MakerWorld", enrich=True,
+            session,
+            "My Model",
+            "https://manyfold.example.com/upload/xyz",
+            "model.3mf",
+            source_url="https://makerworld.com/models/1",
+            source_text="MakerWorld",
+            enrich=True,
         )
     assert ok is True
     mock_poll.assert_not_called()
@@ -324,8 +347,13 @@ def test_create_model_from_upload_202_falls_back_to_polling():
         patch("bambuddy_to_manyfold.enrich_manyfold_model_from_makerworld") as mock_enrich,
     ):
         ok = create_manyfold_model_from_upload(
-            session, "My Model", "https://manyfold.example.com/upload/xyz", "model.3mf",
-            source_url="https://makerworld.com/models/1", source_text="MakerWorld", enrich=True,
+            session,
+            "My Model",
+            "https://manyfold.example.com/upload/xyz",
+            "model.3mf",
+            source_url="https://makerworld.com/models/1",
+            source_text="MakerWorld",
+            enrich=True,
         )
     assert ok is True
     mock_poll.assert_called_once()
@@ -337,7 +365,10 @@ def test_create_model_from_upload_rejects_unexpected_status():
     resp = _mock_response(500)
     with patch("bambuddy_to_manyfold.manyfold_post", return_value=resp):
         ok = create_manyfold_model_from_upload(
-            MagicMock(), "My Model", "https://manyfold.example.com/upload/xyz", "model.3mf",
+            MagicMock(),
+            "My Model",
+            "https://manyfold.example.com/upload/xyz",
+            "model.3mf",
         )
     assert ok is False
 
@@ -352,7 +383,10 @@ def test_create_model_with_files_201_uses_location_directly():
         patch("bambuddy_to_manyfold._poll_for_new_manyfold_model") as mock_poll,
     ):
         model_id, ok_ids = create_manyfold_model_with_files(
-            session, "Grouped Model", [(1, "a.3mf"), (2, "b.3mf")], None,
+            session,
+            "Grouped Model",
+            [(1, "a.3mf"), (2, "b.3mf")],
+            None,
         )
     assert model_id == "grp1"
     assert ok_ids == [1, 2]
@@ -369,7 +403,10 @@ def test_create_model_with_files_202_falls_back_to_polling():
         patch("bambuddy_to_manyfold._poll_for_new_manyfold_model", return_value="grp2") as mock_poll,
     ):
         model_id, ok_ids = create_manyfold_model_with_files(
-            session, "Grouped Model", [(1, "a.3mf"), (2, "b.3mf")], None,
+            session,
+            "Grouped Model",
+            [(1, "a.3mf"), (2, "b.3mf")],
+            None,
         )
     assert model_id == "grp2"
     assert ok_ids == [1, 2]
@@ -439,13 +476,16 @@ def test_single_force_re_enriches_already_synced():
 
 # ── get_makerworld_status ────────────────────────────────────────────────────
 
+
 def test_get_makerworld_status_success():
     session = MagicMock()
     resp = MagicMock(ok=True)
     resp.json.return_value = {"has_cloud_token": True, "can_download": True, "sign_in_expired": False}
     session.get.return_value = resp
     assert get_makerworld_status(session) == {
-        "has_cloud_token": True, "can_download": True, "sign_in_expired": False,
+        "has_cloud_token": True,
+        "can_download": True,
+        "sign_in_expired": False,
     }
 
 
@@ -462,6 +502,7 @@ def test_get_makerworld_status_request_exception_returns_none():
 
 
 # ── import_makerworld_url ────────────────────────────────────────────────────
+
 
 def _mock_import_response(status_ok, library_file_id=None, profile_id=None, status_code=200, text=""):
     resp = MagicMock()
@@ -491,7 +532,8 @@ def test_import_makerworld_url_success_with_explicit_profile():
     session = MagicMock()
     session.post.return_value = _mock_import_response(True, library_file_id=42, profile_id=789)
     file_id, canonical_url, error = import_makerworld_url(
-        session, "https://makerworld.com/models/123#profileId-789",
+        session,
+        "https://makerworld.com/models/123#profileId-789",
     )
     assert error is None
     assert file_id == 42
@@ -528,11 +570,13 @@ def test_import_makerworld_url_stale_profile_gets_actionable_message():
     """
     session = MagicMock()
     session.post.return_value = _mock_import_response(
-        False, status_code=502,
+        False,
+        status_code=502,
         text='{"detail":"Bambu Lab API unexpected status 400 for profile 1206471"}',
     )
     file_id, canonical_url, error = import_makerworld_url(
-        session, "https://makerworld.com/models/1194118#profileId-1206471",
+        session,
+        "https://makerworld.com/models/1194118#profileId-1206471",
     )
     assert file_id is None
     assert canonical_url is None
@@ -547,7 +591,8 @@ def test_import_makerworld_url_same_failure_without_profile_id_stays_generic():
     """
     session = MagicMock()
     session.post.return_value = _mock_import_response(
-        False, status_code=502,
+        False,
+        status_code=502,
         text='{"detail":"Bambu Lab API unexpected status 400 for profile 999"}',
     )
     file_id, canonical_url, error = import_makerworld_url(session, "https://makerworld.com/models/1194118")
@@ -594,7 +639,8 @@ def test_import_makerworld_all_profiles_imports_every_instance():
     """
     session = MagicMock()
     session.post.return_value = _mock_resolve_response(
-        True, instances=[{"id": 1, "profileId": 11}, {"id": 2, "profileId": 22}],
+        True,
+        instances=[{"id": 1, "profileId": 11}, {"id": 2, "profileId": 22}],
     )
     with patch(
         "bambuddy_to_manyfold.import_makerworld_url",
@@ -617,7 +663,8 @@ def test_import_makerworld_all_profiles_imports_every_instance():
 def test_import_makerworld_all_profiles_dedupes_repeated_profile_ids():
     session = MagicMock()
     session.post.return_value = _mock_resolve_response(
-        True, instances=[{"id": 1, "profileId": 11}, {"id": 2, "profileId": 11}],
+        True,
+        instances=[{"id": 1, "profileId": 11}, {"id": 2, "profileId": 11}],
     )
     with patch(
         "bambuddy_to_manyfold.import_makerworld_url",
@@ -635,7 +682,8 @@ def test_import_makerworld_all_profiles_partial_failure_continues_batch():
     """
     session = MagicMock()
     session.post.return_value = _mock_resolve_response(
-        True, instances=[{"id": 1, "profileId": 11}, {"id": 2, "profileId": 22}],
+        True,
+        instances=[{"id": 1, "profileId": 11}, {"id": 2, "profileId": 22}],
     )
     with patch(
         "bambuddy_to_manyfold.import_makerworld_url",
@@ -681,6 +729,7 @@ def test_import_makerworld_all_profiles_no_instances():
 
 
 # ── sync_makerworld_urls ─────────────────────────────────────────────────────
+
 
 def test_sync_makerworld_urls_dedupes_and_syncs():
     # Query strings and #profileId fragments are stripped before dedup (see

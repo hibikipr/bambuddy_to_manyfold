@@ -100,6 +100,7 @@ def dprint(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -121,6 +122,7 @@ def save_sync_state(state: dict):
 
 
 # ── Bambuddy helpers ──────────────────────────────────────────────────────────
+
 
 def bambuddy_headers() -> dict:
     return {"X-API-Key": BAMBUDDY_API_KEY, "Accept": "application/json"}
@@ -153,7 +155,7 @@ def get_bambuddy_archives(session: requests.Session) -> list:
             batch = data.get("archives", data.get("items", []))
         archives.extend(batch)
         dprint(f"    offset {offset}: {len(batch)} archives (total so far: {len(archives)})")
-        if len(batch) < PAGE_SIZE:   # short page → no more
+        if len(batch) < PAGE_SIZE:  # short page → no more
             break
         offset += PAGE_SIZE
     return archives
@@ -332,11 +334,15 @@ def import_makerworld_url(session: requests.Session, url: str) -> tuple[int | No
         # stale/edited plate link (the design was updated on MakerWorld since the link was
         # copied) surfaces as an opaque 400 here rather than a clear "plate not found".
         if profile_id is not None and "Bambu Lab API unexpected status" in detail:
-            return None, None, (
-                f"MakerWorld import failed for {url}: plate #profileId-{profile_id} looks "
-                f"stale or no longer valid for this design ({resp.status_code} {detail}). "
-                f"Try pasting the URL without the #profileId-{profile_id} fragment to let "
-                f"Bambuddy pick a valid plate automatically."
+            return (
+                None,
+                None,
+                (
+                    f"MakerWorld import failed for {url}: plate #profileId-{profile_id} looks "
+                    f"stale or no longer valid for this design ({resp.status_code} {detail}). "
+                    f"Try pasting the URL without the #profileId-{profile_id} fragment to let "
+                    f"Bambuddy pick a valid plate automatically."
+                ),
             )
         return None, None, f"MakerWorld import failed for {url}: {resp.status_code} {detail}"
 
@@ -355,7 +361,8 @@ def import_makerworld_url(session: requests.Session, url: str) -> tuple[int | No
 
 
 def import_makerworld_all_profiles(
-    session: requests.Session, model_id: str,
+    session: requests.Session,
+    model_id: str,
 ) -> tuple[dict[int, str], list[str]]:
     """Import every print profile (plate) of a MakerWorld design.
 
@@ -399,7 +406,8 @@ def import_makerworld_all_profiles(
     errors: list[str] = []
     for pid in profile_ids:
         file_id, canonical_url, error = import_makerworld_url(
-            session, f"https://makerworld.com/models/{model_id}#profileId-{pid}",
+            session,
+            f"https://makerworld.com/models/{model_id}#profileId-{pid}",
         )
         if error:
             errors.append(error)
@@ -508,8 +516,8 @@ def _html_to_markdown(value: str | None) -> str | None:
     parser = _HTMLToMarkdown()
     parser.feed(value)
     text = "".join(parser.out)
-    text = re.sub(r"[ \t]+\n", "\n", text)     # trailing whitespace before newlines
-    text = re.sub(r"\n{3,}", "\n\n", text)     # collapse excess blank lines
+    text = re.sub(r"[ \t]+\n", "\n", text)  # trailing whitespace before newlines
+    text = re.sub(r"\n{3,}", "\n\n", text)  # collapse excess blank lines
     return text.strip() or None
 
 
@@ -577,6 +585,7 @@ def download_bambuddy_library_file(session: requests.Session, file_id: int, dest
 
 
 # ── Manyfold helpers ──────────────────────────────────────────────────────────
+
 
 def obtain_manyfold_token(session: requests.Session, scopes: str | None = None) -> bool:
     """Exchange client_credentials for an access token; update the global MANYFOLD_TOKEN.
@@ -646,8 +655,9 @@ RATELIMIT_RETRIES = 12
 RATELIMIT_WAIT = 20.0
 
 
-def manyfold_post(session: requests.Session, url: str, payload: dict, timeout: int = 120,
-                  retries: int = RATELIMIT_RETRIES) -> requests.Response:
+def manyfold_post(
+    session: requests.Session, url: str, payload: dict, timeout: int = 120, retries: int = RATELIMIT_RETRIES
+) -> requests.Response:
     """POST JSON to Manyfold, retrying on 429 rate-limit responses with backoff."""
     headers = {**manyfold_headers(), "Content-Type": "application/vnd.manyfold.v0+json"}
     resp = session.post(url, json=payload, headers=headers, timeout=timeout)
@@ -666,6 +676,7 @@ def manyfold_post(session: requests.Session, url: str, payload: dict, timeout: i
 
 
 # ── Cleanup: delete empty models ──────────────────────────────────────────────
+
 
 def list_manyfold_models(session: requests.Session, collection_slug: str | None = None) -> list[tuple]:
     """Return [(model_id, name)] for all models, optionally filtered to a collection.
@@ -866,8 +877,7 @@ def tus_upload_file(session: requests.Session, file_path: Path) -> str | None:
                 allow_redirects=False,
             )
             if patch_resp.status_code != 204:
-                print(f"    ⚠️  Tus PATCH failed at offset {offset}: "
-                      f"{patch_resp.status_code} {patch_resp.text[:200]}")
+                print(f"    ⚠️  Tus PATCH failed at offset {offset}: {patch_resp.status_code} {patch_resp.text[:200]}")
                 return None
             new_offset = int(patch_resp.headers.get("Upload-Offset", offset + len(chunk)))
             offset = new_offset
@@ -1091,6 +1101,7 @@ def find_manyfold_model_image_file(
     model_files job has processed the uploaded image.
     """
     import time
+
     for _ in range(attempts):
         time.sleep(delay)
         try:
@@ -1136,8 +1147,12 @@ def enrich_manyfold_model_from_makerworld(
     creator_at_id = ensure_manyfold_creator(session, creator_name) if creator_name else None
 
     if patch_manyfold_model_metadata(
-        session, model_id,
-        name=title, description=description, tag_list=tags, creator_at_id=creator_at_id,
+        session,
+        model_id,
+        name=title,
+        description=description,
+        tag_list=tags,
+        creator_at_id=creator_at_id,
     ):
         bits = []
         if title:
@@ -1157,8 +1172,9 @@ def enrich_manyfold_model_from_makerworld(
         safe_name = re.sub(r"[^\w.-]+", "_", title or model_name)[:60] or "cover"
         with tempfile.TemporaryDirectory() as tmpdir:
             img_dest = Path(tmpdir) / f"{safe_name}_cover{ext}"
-            if download_makerworld_image(session, cover_url, img_dest) and \
-                    add_file_to_manyfold_model(session, model_id, img_dest):
+            if download_makerworld_image(session, cover_url, img_dest) and add_file_to_manyfold_model(
+                session, model_id, img_dest
+            ):
                 dprint("    🖼  Attached MakerWorld cover image")
                 # Set it as the preview once the async file job has processed it.
                 preview_at_id = find_manyfold_model_image_file(session, model_id)
@@ -1253,6 +1269,7 @@ def _poll_for_new_manyfold_model(
 ) -> str | None:
     """Poll until a model ID appears that wasn't in existing_ids (the async-created one)."""
     import time
+
     for _ in range(attempts):
         time.sleep(delay)
         new_ids = _get_all_manyfold_model_ids(session) - existing_ids
@@ -1429,7 +1446,6 @@ def apply_makerworld_extras(
         enrich_manyfold_model_from_makerworld(session, model_id, name, source_url, design=design)
 
 
-
 def get_existing_manyfold_collections(session: requests.Session) -> dict:
     """Return a dict of collection name → collection @id URL for existing Manyfold collections."""
     collections = {}
@@ -1508,13 +1524,21 @@ def upload_model_to_manyfold(
     if not upload_url:
         return False
     return create_manyfold_model_from_upload(
-        session, model_name, upload_url, file_path.name, collection_at_id,
-        source_url=source_url, source_text=source_text, add_link=add_link,
-        enrich=enrich, design=design,
+        session,
+        model_name,
+        upload_url,
+        file_path.name,
+        collection_at_id,
+        source_url=source_url,
+        source_text=source_text,
+        add_link=add_link,
+        enrich=enrich,
+        design=design,
     )
 
 
 # ── Main sync logic ───────────────────────────────────────────────────────────
+
 
 def sync_archives(
     session: requests.Session,
@@ -1621,10 +1645,11 @@ def sync_library_files(
     # Filter to supported extensions
     STRIP_EXTS = {".gcode", ".3mf", ".stl", ".obj", ".step", ".stp"}
     supported = [
-        f for f in lib_files
-        if Path(f.get("filename", f.get("name", ""))).suffix.lower() in LIBRARY_EXTENSIONS
+        f for f in lib_files if Path(f.get("filename", f.get("name", ""))).suffix.lower() in LIBRARY_EXTENSIONS
     ]
-    print(f"\n📁 Syncing {len(supported)}/{len(lib_files)} Bambuddy library files (filtered by extension, create_missing={create_missing}, force={force})...")
+    print(
+        f"\n📁 Syncing {len(supported)}/{len(lib_files)} Bambuddy library files (filtered by extension, create_missing={create_missing}, force={force})..."
+    )
 
     if not dry_run:
         existing_collections = get_existing_manyfold_collections(session)
@@ -1706,8 +1731,13 @@ def sync_library_files(
                 if existing_model_id:
                     tqdm.write(f"  🔎 Applying MakerWorld details to existing model: {model_name}")
                     apply_makerworld_extras(
-                        session, existing_model_id, model_name, source_url,
-                        add_source_links, enrich_from_makerworld, design,
+                        session,
+                        existing_model_id,
+                        model_name,
+                        source_url,
+                        add_source_links,
+                        enrich_from_makerworld,
+                        design,
                     )
                 else:
                     tqdm.write(f"  ⏭  Already in Manyfold (skipping duplicate): {model_name}")
@@ -1736,9 +1766,15 @@ def sync_library_files(
             collection_at_id = _ensure_collection(folder_id)
             tqdm.write(f"  ↑  Uploading to Manyfold: {label}")
             ok = upload_model_to_manyfold(
-                session, model_name, dest, collection_at_id, dry_run,
-                source_url=source_url, source_text="MakerWorld",
-                add_link=add_source_links, enrich=enrich_from_makerworld,
+                session,
+                model_name,
+                dest,
+                collection_at_id,
+                dry_run,
+                source_url=source_url,
+                source_text="MakerWorld",
+                add_link=add_source_links,
+                enrich=enrich_from_makerworld,
                 design=design,
             )
 
@@ -1759,9 +1795,7 @@ def sync_library_files(
             return 0
 
         rep_url = makerworld_urls.get(entries[0].get("id"))
-        model_name = _name_from_filename(
-            entries[0].get("filename") or entries[0].get("name", f"design_{mw_id}")
-        )
+        model_name = _name_from_filename(entries[0].get("filename") or entries[0].get("name", f"design_{mw_id}"))
         design = None
         if rep_url and enrich_from_makerworld and not dry_run:
             design = get_makerworld_design(session, rep_url)
@@ -1844,8 +1878,13 @@ def sync_library_files(
         # re-attach a duplicate cover image on every run.
         if not already_enriched:
             apply_makerworld_extras(
-                session, model_id, model_name, rep_url,
-                add_source_links, enrich_from_makerworld, design,
+                session,
+                model_id,
+                model_name,
+                rep_url,
+                add_source_links,
+                enrich_from_makerworld,
+                design,
             )
         synced_mw[mw_id] = model_id
         for fid in synced_fids:
@@ -1992,7 +2031,10 @@ def sync_makerworld_urls(
         return 0
 
     return sync_library_files(
-        session, state, existing_names, dry_run,
+        session,
+        state,
+        existing_names,
+        dry_run,
         selected_ids=set(file_urls),
         create_missing=create_missing,
         force=force,
@@ -2052,6 +2094,7 @@ def check_manyfold_upload_scope(session: requests.Session):
     how to grant 'public read write upload' to the OAuth application.
     """
     import base64
+
     try:
         resp = session.post(
             f"{MANYFOLD_URL}/upload",
@@ -2100,9 +2143,7 @@ def check_manyfold_upload_scope(session: requests.Session):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Sync 3D models from Bambuddy to Manyfold."
-    )
+    parser = argparse.ArgumentParser(description="Sync 3D models from Bambuddy to Manyfold.")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -2139,8 +2180,8 @@ def main():
         const="MakerWorld",
         metavar="COLLECTION",
         help="Instead of syncing, delete Manyfold models that have no files. Optionally "
-             "limit to a collection by name (default 'MakerWorld'); pass 'ALL' to scan "
-             "every collection. Honours --dry-run. Requires the 'delete' OAuth scope.",
+        "limit to a collection by name (default 'MakerWorld'); pass 'ALL' to scan "
+        "every collection. Honours --dry-run. Requires the 'delete' OAuth scope.",
     )
     args = parser.parse_args()
 
@@ -2172,8 +2213,7 @@ def main():
             sys.exit(1)
         collection = None if args.cleanup_empty.upper() == "ALL" else args.cleanup_empty
         deleted = cleanup_empty_models(session, collection, args.dry_run)
-        print(f"\n✅ Cleanup complete — {deleted} empty model(s) "
-              f"{'would be ' if args.dry_run else ''}deleted.")
+        print(f"\n✅ Cleanup complete — {deleted} empty model(s) {'would be ' if args.dry_run else ''}deleted.")
         return
 
     check_connections(session)
@@ -2184,8 +2224,20 @@ def main():
 
     start = time.time()
     create_missing = not args.no_create
-    archives_added = sync_archives(session, state, existing_names, args.dry_run, create_missing=create_missing, force=args.force)
-    library_added = sync_library_files(session, state, existing_names, args.dry_run, create_missing=create_missing, force=args.force, add_source_links=not args.no_links, enrich_from_makerworld=not args.no_enrich, group_makerworld_profiles=not args.no_group)
+    archives_added = sync_archives(
+        session, state, existing_names, args.dry_run, create_missing=create_missing, force=args.force
+    )
+    library_added = sync_library_files(
+        session,
+        state,
+        existing_names,
+        args.dry_run,
+        create_missing=create_missing,
+        force=args.force,
+        add_source_links=not args.no_links,
+        enrich_from_makerworld=not args.no_enrich,
+        group_makerworld_profiles=not args.no_group,
+    )
 
     if not args.dry_run:
         save_sync_state(state)
