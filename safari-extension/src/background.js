@@ -72,24 +72,7 @@ browser.action.onClicked.addListener(async (tab) => {
   await toast(tab.id, result.message, result.color);
 });
 
-async function syncEnabled(tabId, url) {
-  try {
-    if (isModelUrl(url)) await browser.action.enable(tabId);
-    else await browser.action.disable(tabId);
-  } catch (e) {
-    // unsupported
-  }
-}
-
-browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.url || changeInfo.status) syncEnabled(tabId, tab.url);
-});
-
-browser.tabs.onActivated.addListener(async ({ tabId }) => {
-  try {
-    const tab = await browser.tabs.get(tabId);
-    await syncEnabled(tabId, tab.url);
-  } catch (e) {
-    // ignore
-  }
-});
+// The button stays enabled on every tab. Disabling it per tab from
+// tabs.onUpdated left it switched off after the first click in Safari, until
+// the page was reloaded, because Safari doesn't always give tab.url there.
+// A click on a page that isn't a model page shows a toast instead.

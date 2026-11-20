@@ -28,7 +28,7 @@ async function test() {
   const base = normalize($("baseUrl").value);
   const token = $("token").value.trim();
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
-  setStatus("Testing…");
+  setStatus("Testing\u2026");
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 10000);
   try {
