@@ -15,11 +15,13 @@ from unittest.mock import MagicMock, patch
 from bambuddy_to_manyfold import (
     _clean_makerworld_url,
     _extract_makerworld_image_urls,
+    _english_upload_filename,
     _extract_makerworld_tags,
     _flatten_folders,
     _html_to_markdown,
     _image_ext_from_url,
     _makerworld_model_id,
+    _legacy_model_names,
     _makerworld_profile_id,
     _makerworld_summary,
     _makerworld_title,
@@ -1062,3 +1064,103 @@ def test_tags_prefer_translated_then_original():
     assert _extract_makerworld_tags({"tags": ["面具"], "tagsTranslated": ["Mask"]}) == ["Mask"]
     assert _extract_makerworld_tags({"tags": ["mask"], "tagsTranslated": []}) == ["mask"]
     assert _extract_makerworld_tags({"tags": ["mask"]}) == ["mask"]
+
+
+# ── Adopting models named with the original title / English filenames ─────
+
+_ZH_DESIGN = {
+    "title": "塞尔达头盔",
+    "titleTranslated": "Zelda Helmet",
+    "instances": [{"id": 1834926, "title": "0.2mm 层高", "titleTranslated": "0.2mm layer"}],
+}
+_ZH_URL = "https://makerworld.com/en/models/1727896#profileId-1834926"
+
+
+def test_legacy_names_original_title_and_filename():
+    assert _legacy_model_names(_ZH_DESIGN, "plate-a", "Zelda Helmet") == ["塞尔达头盔", "plate-a"]
+    # The current name is never its own legacy name; blanks and dupes are dropped.
+    assert _legacy_model_names({"title": "Same"}, "Same", "Same") == []
+    assert _legacy_model_names(None, " ", "X") == []
+
+
+def test_english_filename_uses_translated_titles():
+    assert _english_upload_filename("x.3mf", _ZH_DESIGN, _ZH_URL) == "Zelda Helmet - 0.2mm layer.3mf"
+    assert _english_upload_filename("x.gcode.3mf", _ZH_DESIGN, _ZH_URL) == "Zelda Helmet - 0.2mm layer.gcode.3mf"
+
+
+def test_english_filename_sanitises_unsafe_characters():
+    design = {"titleTranslated": 'A/B: "C"', "instances": [{"id": 5, "titleTranslated": "p?"}]}
+    assert (
+        _english_upload_filename("x.3mf", design, "https://makerworld.com/models/1#profileId-5") == "A_B_ _C_ - p.3mf"
+    )
+
+
+def test_english_filename_unchanged_without_translation_or_profile():
+    english = {"title": "Zelda", "titleTranslated": "", "instances": [{"id": 1834926, "title": "p"}]}
+    assert _english_upload_filename("orig.3mf", english, _ZH_URL) == "orig.3mf"
+    assert _english_upload_filename("orig.3mf", _ZH_DESIGN, "https://makerworld.com/models/1") == "orig.3mf"
+    assert _english_upload_filename("orig.3mf", _ZH_DESIGN, "https://makerworld.com/models/1#profileId-9") == "orig.3mf"
+    assert _english_upload_filename("orig.3mf", None, _ZH_URL) == "orig.3mf"
+
+
+def _run_adopt_sync(existing_names: set, design: dict):
+    entries = [{"id": 7, "filename": "plate-a.3mf", "folder_id": None}]
+    with (
+        patch("bambuddy_to_manyfold.get_bambuddy_library_files", return_value=entries),
+        patch("bambuddy_to_manyfold.get_bambuddy_makerworld_urls", return_value={7: _ZH_URL}),
+        patch("bambuddy_to_manyfold.get_bambuddy_library_folders", return_value=[]),
+        patch("bambuddy_to_manyfold.get_existing_manyfold_collections", return_value={}),
+        patch("bambuddy_to_manyfold.get_makerworld_design", return_value=design),
+        patch("bambuddy_to_manyfold.download_bambuddy_library_file"),
+        patch("bambuddy_to_manyfold.find_manyfold_model_id_by_name", return_value="old123") as mock_find,
+        patch("bambuddy_to_manyfold.upload_model_to_manyfold", return_value=True) as mock_upload,
+        patch("bambuddy_to_manyfold.apply_makerworld_extras") as mock_enrich,
+    ):
+        sync_library_files(MagicMock(), {}, existing_names, dry_run=False)
+        return mock_find, mock_upload, mock_enrich
+
+
+def test_single_adopts_model_under_original_title_instead_of_duplicating():
+    names = {"塞尔达头盔"}
+    mock_find, mock_upload, mock_enrich = _run_adopt_sync(names, _ZH_DESIGN)
+    mock_upload.assert_not_called()
+    mock_find.assert_called_once()
+    assert mock_find.call_args.args[1] == "塞尔达头盔"
+    mock_enrich.assert_called_once()  # enrichment renames it to the English title
+    assert names == {"Zelda Helmet"}
+
+
+def test_single_creates_new_model_with_english_filename_when_none_exists():
+    _, mock_upload, _ = _run_adopt_sync(set(), _ZH_DESIGN)
+    mock_upload.assert_called_once()
+    assert mock_upload.call_args.args[1] == "Zelda Helmet"
+    assert mock_upload.call_args.args[2].name == "Zelda Helmet - 0.2mm layer.3mf"
+
+
+def test_group_adopts_model_under_original_title():
+    entries = [
+        {"id": 1, "filename": "plate-a.3mf", "folder_id": None},
+        {"id": 2, "filename": "plate-b.3mf", "folder_id": None},
+    ]
+    names = {"塞尔达头盔"}
+    with (
+        patch("bambuddy_to_manyfold.get_bambuddy_library_files", return_value=entries),
+        patch(
+            "bambuddy_to_manyfold.get_bambuddy_makerworld_urls",
+            return_value={1: _ZH_URL, 2: "https://makerworld.com/models/1727896#profileId-2"},
+        ),
+        patch("bambuddy_to_manyfold.get_bambuddy_library_folders", return_value=[]),
+        patch("bambuddy_to_manyfold.get_existing_manyfold_collections", return_value={}),
+        patch("bambuddy_to_manyfold.get_makerworld_design", return_value=_ZH_DESIGN),
+        patch("bambuddy_to_manyfold.download_bambuddy_library_file"),
+        patch("bambuddy_to_manyfold.find_manyfold_model_id_by_name", return_value="old123") as mock_find,
+        patch("bambuddy_to_manyfold.add_files_to_manyfold_model", return_value=[1, 2]) as mock_add,
+        patch("bambuddy_to_manyfold.create_manyfold_model_with_files") as mock_create,
+        patch("bambuddy_to_manyfold.apply_makerworld_extras") as mock_enrich,
+    ):
+        sync_library_files(MagicMock(), {}, names, dry_run=False)
+    mock_create.assert_not_called()
+    assert mock_find.call_args.args[1] == "塞尔达头盔"
+    assert mock_add.call_args.args[1] == "old123"
+    mock_enrich.assert_called_once()
+    assert names == {"Zelda Helmet"}

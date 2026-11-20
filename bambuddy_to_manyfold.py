@@ -545,6 +545,53 @@ def _makerworld_summary(design: dict | None) -> str | None:
     return None
 
 
+def _legacy_model_names(design: dict | None, fallback_name: str, current_name: str) -> list[str]:
+    """Names an already-synced model may have under from before titles were translated.
+
+    That's the author's original ``title`` and the name derived from the library
+    filename. Used to recognise (and rename) an existing model instead of
+    creating a duplicate now that new models are named with the English title.
+    """
+    names: list[str] = []
+    for n in ((design or {}).get("title"), fallback_name):
+        if isinstance(n, str):
+            n = n.strip()
+            if n and n != current_name and n not in names:
+                names.append(n)
+    return names
+
+
+def _english_upload_filename(filename: str, design: dict | None, source_url: str | None) -> str:
+    """Build ``<model title> - <profile title>.<ext>`` from MakerWorld's translated titles.
+
+    Only applies when MakerWorld supplies a translation for the model or the
+    matched profile (the profile is found via the URL's ``#profileId-``);
+    otherwise the original filename is returned unchanged.
+    """
+    if not design or not filename:
+        return filename
+    inst = None
+    pid = _makerworld_profile_id(source_url)
+    if pid:
+        inst = next(
+            (i for i in design.get("instances") or [] if isinstance(i, dict) and str(i.get("id")) == pid),
+            None,
+        )
+    translated = bool((design.get("titleTranslated") or "").strip()) or bool(
+        inst and (inst.get("titleTranslated") or "").strip()
+    )
+    if not translated or inst is None:
+        return filename
+    model_title = _makerworld_title(design)
+    profile_title = _makerworld_title(inst)
+    stem = " - ".join(x for x in (model_title, profile_title) if x)
+    stem = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", stem).strip(" ._")[:120]
+    if not stem:
+        return filename
+    ext = ".gcode.3mf" if filename.lower().endswith(".gcode.3mf") else Path(filename).suffix
+    return f"{stem}{ext}"
+
+
 def _extract_makerworld_tags(design: dict) -> list[str]:
     """Pull a flat list of tag strings from the design, if any.
 
@@ -1775,6 +1822,7 @@ def sync_library_files(
         file_id = file_entry.get("id")
         filename = file_entry.get("filename") or file_entry.get("name", f"file_{file_id}")
         model_name = _name_from_filename(filename)
+        original_name = model_name
 
         if file_id in synced_ids and not force:
             tqdm.write(f"  ⏭  Already synced: {model_name}")
@@ -1797,7 +1845,15 @@ def sync_library_files(
         elif need_urls:
             dprint(f"    (no MakerWorld link for file id {file_id} — not in recent-imports window)")
 
-        if model_name in existing_names:
+        # A model created before titles were translated lives under the
+        # author's original name: adopt (and rename) it rather than duplicate.
+        adopt_name = None
+        if model_name not in existing_names:
+            adopt_name = next(
+                (n for n in _legacy_model_names(design, original_name, model_name) if n in existing_names), None
+            )
+
+        if model_name in existing_names or adopt_name:
             # First time we've reached this design (or an explicit --force
             # retry) and Manyfold already has a same-titled model: mirror
             # process_group's reuse path — apply MakerWorld enrichment to it
@@ -1806,9 +1862,12 @@ def sync_library_files(
             # Gated on (force or file not previously synced by us) so an
             # ordinary re-sync doesn't re-attach a duplicate cover image.
             if source_url and enrich_from_makerworld and (force or file_id not in synced_ids):
-                existing_model_id = find_manyfold_model_id_by_name(session, model_name)
+                existing_model_id = find_manyfold_model_id_by_name(session, adopt_name or model_name)
                 if existing_model_id:
-                    tqdm.write(f"  🔎 Applying MakerWorld details to existing model: {model_name}")
+                    if adopt_name:
+                        existing_names.discard(adopt_name)
+                        existing_names.add(model_name)
+                    tqdm.write(f"  🔎 Applying MakerWorld details to existing model: {adopt_name or model_name}")
                     apply_makerworld_extras(
                         session,
                         existing_model_id,
@@ -1835,7 +1894,7 @@ def sync_library_files(
 
         tqdm.write(f"  ↓  Downloading: {label}")
         with tempfile.TemporaryDirectory() as tmpdir:
-            dest = Path(tmpdir) / filename
+            dest = Path(tmpdir) / _english_upload_filename(filename, design, source_url)
             try:
                 download_bambuddy_library_file(session, file_id, dest)
             except Exception as e:
@@ -1875,6 +1934,7 @@ def sync_library_files(
 
         rep_url = makerworld_urls.get(entries[0].get("id"))
         model_name = _name_from_filename(entries[0].get("filename") or entries[0].get("name", f"design_{mw_id}"))
+        original_name = model_name
         design = None
         if rep_url and enrich_from_makerworld and not dry_run:
             design = get_makerworld_design(session, rep_url)
@@ -1900,10 +1960,24 @@ def sync_library_files(
             return len(to_sync)
 
         # Models not yet tracked but already present by title → reuse them.
-        if not existing_model_id and model_name in existing_names:
-            existing_model_id = find_manyfold_model_id_by_name(session, model_name)
-            if existing_model_id:
-                synced_mw[mw_id] = existing_model_id
+        # (also models still under the author's original name, which get renamed
+        # by the enrichment below instead of being duplicated).
+        if not existing_model_id:
+            lookup_name = next(
+                (
+                    n
+                    for n in [model_name, *_legacy_model_names(design, original_name, model_name)]
+                    if n in existing_names
+                ),
+                None,
+            )
+            if lookup_name:
+                existing_model_id = find_manyfold_model_id_by_name(session, lookup_name)
+                if existing_model_id:
+                    synced_mw[mw_id] = existing_model_id
+                    if lookup_name != model_name:
+                        existing_names.discard(lookup_name)
+                        existing_names.add(model_name)
 
         if not existing_model_id and not create_missing:
             tqdm.write(f"  ⏭  Not in Manyfold and create_missing=False — skipping: {model_name}")
@@ -1921,7 +1995,7 @@ def sync_library_files(
                 fn = e.get("filename") or e.get("name", f"file_{fid}")
                 sub = Path(tmpdir) / str(fid)
                 sub.mkdir(parents=True, exist_ok=True)
-                dest = sub / fn
+                dest = sub / _english_upload_filename(fn, design, makerworld_urls.get(fid))
                 try:
                     download_bambuddy_library_file(session, fid, dest)
                     downloaded.append((fid, dest))
