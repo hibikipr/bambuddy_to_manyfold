@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 from bambuddy_to_manyfold import (
     _clean_makerworld_url,
+    _extract_makerworld_image_urls,
     _extract_makerworld_tags,
     _flatten_folders,
     _html_to_markdown,
@@ -24,6 +25,7 @@ from bambuddy_to_manyfold import (
     _slugify,
     create_manyfold_model_from_upload,
     create_manyfold_model_with_files,
+    enrich_manyfold_model_from_makerworld,
     get_makerworld_status,
     import_makerworld_all_profiles,
     import_makerworld_url,
@@ -922,3 +924,113 @@ def test_sync_makerworld_urls_status_check_failure_proceeds_normally():
         count = sync_makerworld_urls(MagicMock(), {}, set(), ["https://makerworld.com/models/1"], dry_run=False)
     assert count == 1
     mock_sync.assert_called_once()
+
+
+# ── MakerWorld image gallery ───────────────────────────────────────────────
+#
+# Enrichment used to attach only the cover. It now attaches every gallery
+# image (cover + design pictures + per-profile photos), cover first.
+
+_CDN = "https://makerworld.bblmw.com/makerworld/model/X"
+
+
+def _design_with_images():
+    return {
+        "coverUrl": f"{_CDN}/design/cover.jpeg",
+        "designExtension": {
+            "design_pictures": [
+                {"url": f"{_CDN}/design/g1.jpeg"},
+                {"url": f"{_CDN}/design/g2.jpeg"},
+            ]
+        },
+        "instances": [
+            {
+                "cover": f"{_CDN}/instance/p1.jpeg",
+                "pictures": [{"url": f"{_CDN}/instance/p1.jpeg"}, {"url": f"{_CDN}/instance/p2.jpeg"}],
+                # Plate renders must NOT be picked up.
+                "extention": {"modelInfo": {"plates": [{"thumbnail": {"url": f"{_CDN}/instance/plate_1.png"}}]}},
+            }
+        ],
+    }
+
+
+def test_extract_image_urls_cover_first_then_gallery_then_profile_photos():
+    assert _extract_makerworld_image_urls(_design_with_images()) == [
+        f"{_CDN}/design/cover.jpeg",
+        f"{_CDN}/design/g1.jpeg",
+        f"{_CDN}/design/g2.jpeg",
+        f"{_CDN}/instance/p1.jpeg",
+        f"{_CDN}/instance/p2.jpeg",
+    ]
+
+
+def test_extract_image_urls_dedupes_and_ignores_junk():
+    design = {
+        "coverUrl": f"{_CDN}/a.jpeg?x=1",
+        "designExtension": {"design_pictures": [{"url": f"{_CDN}/a.jpeg?x=2"}, {"url": None}, {"nope": 1}, "str"]},
+        "instances": [None, {"pictures": [{"url": "not-a-url"}]}],
+    }
+    assert _extract_makerworld_image_urls(design) == [f"{_CDN}/a.jpeg?x=1"]
+
+
+def test_extract_image_urls_empty_design():
+    assert _extract_makerworld_image_urls({}) == []
+    assert _extract_makerworld_image_urls({"designExtension": None, "instances": None}) == []
+
+
+def test_extract_image_urls_is_capped():
+    design = {"designExtension": {"design_pictures": [{"url": f"{_CDN}/{i}.jpg"} for i in range(100)]}}
+    assert len(_extract_makerworld_image_urls(design)) == 40
+
+
+def test_enrich_uploads_every_image_and_sets_cover_as_preview():
+    uploaded = []
+
+    def fake_download(_session, _url, dest):
+        dest.write_bytes(b"img")
+        return True
+
+    def fake_add(_session, _model_id, path):
+        uploaded.append(path.name)
+        return True
+
+    with (
+        patch("bambuddy_to_manyfold.patch_manyfold_model_metadata", return_value=True) as mock_patch,
+        patch("bambuddy_to_manyfold.download_makerworld_image", side_effect=fake_download),
+        patch("bambuddy_to_manyfold.add_file_to_manyfold_model", side_effect=fake_add),
+        patch("bambuddy_to_manyfold.find_manyfold_model_image_file", return_value="https://m/files/1") as mock_find,
+    ):
+        design = {**_design_with_images(), "title": "My Model"}
+        enrich_manyfold_model_from_makerworld(MagicMock(), "m1", "My Model", "https://makerworld.com/models/1", design)
+
+    assert uploaded == [
+        "My_Model_cover.jpeg",
+        "My_Model_02.jpeg",
+        "My_Model_03.jpeg",
+        "My_Model_04.jpeg",
+        "My_Model_05.jpeg",
+    ]
+    # Preview is looked up once, right after the cover upload.
+    mock_find.assert_called_once()
+    assert any(c.kwargs.get("preview_file_at_id") == "https://m/files/1" for c in mock_patch.call_args_list)
+
+
+def test_enrich_continues_when_an_extra_image_fails():
+    def fake_download(_session, url, dest):
+        if url.endswith("g1.jpeg"):
+            return False
+        dest.write_bytes(b"img")
+        return True
+
+    with (
+        patch("bambuddy_to_manyfold.patch_manyfold_model_metadata", return_value=True),
+        patch("bambuddy_to_manyfold.download_makerworld_image", side_effect=fake_download),
+        patch("bambuddy_to_manyfold.add_file_to_manyfold_model", return_value=True) as mock_add,
+        patch("bambuddy_to_manyfold.find_manyfold_model_image_file", return_value=None),
+    ):
+        enrich_manyfold_model_from_makerworld(
+            MagicMock(), "m1", "My Model", "https://makerworld.com/models/1", _design_with_images()
+        )
+
+    # cover + (5 images - cover - 1 failed) = 4 uploads attempted successfully
+    assert mock_add.call_count == 4

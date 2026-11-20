@@ -544,6 +544,41 @@ def _image_ext_from_url(url: str) -> str:
     return ext if ext in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"} else ".png"
 
 
+# Upper bound on images attached per model, so a design with dozens of
+# community print photos can't turn one sync into hundreds of uploads.
+MAX_MAKERWORLD_IMAGES = 40
+
+
+def _extract_makerworld_image_urls(design: dict) -> list[str]:
+    """Return every gallery image URL on a MakerWorld design, cover first.
+
+    Covers the cover, the design gallery (``designExtension.design_pictures``)
+    and each profile's photos (``instances[].pictures``). Duplicates (the cover
+    is normally repeated in the gallery) are dropped, keeping first-seen order,
+    and the list is capped at ``MAX_MAKERWORLD_IMAGES``. Plate renders and
+    avatars are deliberately not included.
+    """
+    candidates: list = [design.get("coverUrl") or design.get("cover")]
+    ext = design.get("designExtension")
+    if isinstance(ext, dict):
+        candidates += [p.get("url") for p in ext.get("design_pictures") or [] if isinstance(p, dict)]
+    for inst in design.get("instances") or []:
+        if isinstance(inst, dict):
+            candidates += [p.get("url") for p in inst.get("pictures") or [] if isinstance(p, dict)]
+
+    urls: list[str] = []
+    seen: set[str] = set()
+    for url in candidates:
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            continue
+        key = url.split("?", 1)[0]
+        if key in seen:
+            continue
+        seen.add(key)
+        urls.append(url)
+    return urls[:MAX_MAKERWORLD_IMAGES]
+
+
 def _slugify(name: str) -> str:
     """Make a non-empty ASCII slug for a creator name.
 
@@ -1131,7 +1166,7 @@ def enrich_manyfold_model_from_makerworld(
     """Fetch MakerWorld design metadata and apply it to a Manyfold model.
 
     Best-effort: sets name, description (Markdown), tags, creator, and attaches
-    the cover image — also setting it as the model's preview_file. Reuses a
+    all MakerWorld images (the cover is also set as the model's preview_file). Reuses a
     pre-fetched ``design`` when given (avoids a second resolve). Any individual
     failure is logged (debug) and skipped — never raises.
     """
@@ -1166,12 +1201,16 @@ def enrich_manyfold_model_from_makerworld(
         if bits:
             dprint(f"    📝 Set {', '.join(bits)}")
 
-    cover_url = design.get("coverUrl") or design.get("cover")
-    if cover_url:
-        ext = _image_ext_from_url(cover_url)
+    image_urls = _extract_makerworld_image_urls(design)
+    if image_urls:
         safe_name = re.sub(r"[^\w.-]+", "_", title or model_name)[:60] or "cover"
         with tempfile.TemporaryDirectory() as tmpdir:
-            img_dest = Path(tmpdir) / f"{safe_name}_cover{ext}"
+            # The first image is the cover: upload it on its own first so it
+            # can be set as the preview once Manyfold has processed it (the
+            # preview lookup picks the first image it finds, so the cover must
+            # be the only one present at that point).
+            cover_url, extra_urls = image_urls[0], image_urls[1:]
+            img_dest = Path(tmpdir) / f"{safe_name}_cover{_image_ext_from_url(cover_url)}"
             if download_makerworld_image(session, cover_url, img_dest) and add_file_to_manyfold_model(
                 session, model_id, img_dest
             ):
@@ -1183,6 +1222,16 @@ def enrich_manyfold_model_from_makerworld(
                         dprint("    ⭐ Set cover as preview file")
                 else:
                     dprint("    (image added but couldn't locate it to set as preview)")
+
+            added = 0
+            for n, url in enumerate(extra_urls, start=2):
+                dest = Path(tmpdir) / f"{safe_name}_{n:02d}{_image_ext_from_url(url)}"
+                if download_makerworld_image(session, url, dest) and add_file_to_manyfold_model(
+                    session, model_id, dest
+                ):
+                    added += 1
+            if extra_urls:
+                dprint(f"    🖼  Attached {added}/{len(extra_urls)} additional MakerWorld image(s)")
 
 
 def create_manyfold_model_from_upload(
