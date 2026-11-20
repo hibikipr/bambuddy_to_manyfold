@@ -124,7 +124,7 @@ python3 bambuddy_to_manyfold.py --force
 # Don't attach MakerWorld source URLs as links on synced models
 python3 bambuddy_to_manyfold.py --no-links
 
-# Don't fetch MakerWorld details (description, tags, cover image)
+# Don't fetch MakerWorld details (description, tags, images)
 python3 bambuddy_to_manyfold.py --no-enrich
 
 # Don't group multiple MakerWorld profiles of one design into a single model
@@ -146,7 +146,7 @@ python3 bambuddy_to_manyfold.py --cleanup-empty ALL
 | `--no-create` | Skips any model not already present in Manyfold. |
 | `--force` | Ignores the local sync-state file so already-recorded items are re-processed. The live "already in Manyfold" check still applies, so this won't create duplicates of models that genuinely synced. |
 | `--no-links` | Skips attaching MakerWorld source URLs as links on synced models. |
-| `--no-enrich` | Skips fetching MakerWorld details (description, tags, cover image). |
+| `--no-enrich` | Skips fetching MakerWorld details (description, tags, images). |
 | `--no-group` | Syncs each MakerWorld profile as its own model instead of grouping profiles of the same design into one. |
 | `--cleanup-empty [COLLECTION]` | Instead of syncing, deletes Manyfold models that have **no files** (e.g. left over from failed uploads). Limits to a collection by name (default `MakerWorld`), or pass `ALL` for every collection. Respects `--dry-run`. Needs the **`delete`** OAuth scope (see below). |
 
@@ -186,8 +186,9 @@ Workflow:
 - **Add MakerWorld links** — attach the MakerWorld source URL (for library files
   imported from MakerWorld) as a clickable link on the created Manyfold model.
 - **Fetch MakerWorld details (description + cover)** — pull the model's name,
-  description, tags, creator, and cover image from MakerWorld and apply them to
-  the Manyfold model (the cover is also set as the model's preview image).
+  description, tags, creator, and all of its images (cover, gallery and profile
+  photos, up to 40) from MakerWorld and apply them to the Manyfold model (the
+  cover is also set as the model's preview image).
 - **Group MakerWorld profiles into one model** — Bambuddy stores each imported
   MakerWorld profile (plate) as a separate file. With this on, profiles of the
   same design are combined into a single Manyfold model holding all the plate
@@ -401,7 +402,8 @@ Tests use `node:test` and have no dependencies.
     - **description** (notes) ← the design summary, converted from HTML to Markdown
     - **tags** (keywords) ← the design tags
     - **creator** ← the MakerWorld designer (found or created in Manyfold by name)
-    - **cover image** ← uploaded as a model file and set as the model's preview
+    - **images** ← the cover, gallery and profile photos (up to 40), each uploaded as a model
+      file; the cover is set as the model's preview
 
   Because `recent-imports` is capped at 50 rows, only the 50 most recent
   MakerWorld imports get links/details; the upload endpoint can't accept links,
