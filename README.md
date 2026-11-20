@@ -98,6 +98,7 @@ without needing to restart with new environment variables.
 | `MANYFOLD_LIBRARY_ID` | — | Manyfold library to upload into (default `1`) |
 | `SYNC_STATE_FILE` | — | Path to the sync-state JSON (default `bambuddy_sync_state.json`) |
 | `MANYFOLD_SYNC_DEBUG` | — | `1` to enable verbose diagnostic output |
+| `B2M_API_TOKEN` | — | Optional API token. When set, `POST /api/*` needs a bearer token. See [Safari extension](#safari-extension-mac-iphone-ipad) |
 
 \* Either `MANYFOLD_CLIENT_ID` + `MANYFOLD_CLIENT_SECRET`, **or** a
 `MANYFOLD_TOKEN`, must be set. Use client credentials to upload.
@@ -271,6 +272,101 @@ To add it to an existing compose stack:
     volumes: ["bambuddy_manyfold_data:/data"]
 # (add `bambuddy_manyfold_data:` under your top-level `volumes:`)
 ```
+
+---
+
+## Safari extension (Mac, iPhone, iPad)
+
+The `safari-extension/` folder holds **B2M Sender**, a Safari Web Extension
+(source in `safari-extension/src/`, Xcode project in `safari-extension/xcode/`).
+
+On a MakerWorld model page, it sends the page URL to
+`POST /api/makerworld-urls/start`. This is the same as pasting the URL into the
+MakerWorld URLs tab and clicking **Fetch & sync**: all print profiles of the
+design are imported, with default options.
+
+The result shows as a toolbar badge (✓ / BUSY / ✗) and a short toast on the page.
+
+- **409**: another job is running. Try again later.
+- **"Can't reach the server"**: usually means you're off the home network or VPN.
+
+### Server
+
+The extension defaults to `https://modelsync.townsville.cc`. To change it, open
+the extension's **Settings**, set **Server URL**, optionally set the **API token**
+(see [below](#optional-api-token-b2m_api_token)), and press **Test connection**.
+
+A different host also needs to be added to `host_permissions` in
+`safari-extension/src/manifest.json`, followed by a rebuild.
+
+### Install on Mac (local dev build)
+
+1. Open the Xcode project in `safari-extension/xcode/`, select the **macOS**
+   scheme, and press Run.
+2. In Safari, go to **Settings → Advanced** and enable
+   **Show features for web developers**.
+3. In the **Develop** menu, choose **Allow unsigned extensions**. For unsigned
+   builds, this is needed again after each Safari restart.
+4. Go to **Settings → Extensions**, enable **B2M Sender**, and allow it on
+   `makerworld.com` and `modelsync.townsville.cc`.
+
+A signed build (same team) avoids the unsigned-extensions toggle.
+
+### Install on iPhone and iPad
+
+1. Build to the device from Xcode, or install a TestFlight build. Builds are made
+   with Xcode Cloud. TestFlight builds expire after 90 days.
+2. On the device, go to **Settings → Apps → Safari → Extensions** and enable
+   **B2M Sender**.
+3. Allow it on `makerworld.com` and `modelsync.townsville.cc`.
+4. On a MakerWorld page, open the page menu (**aA** or the puzzle-piece icon) and
+   choose **B2M Sender**.
+
+iOS doesn't show the badge, so watch for the toast.
+
+### Xcode Cloud
+
+The project has shared schemes for the macOS and iOS apps. Create the workflow in
+Xcode with **Product → Xcode Cloud → Create Workflow**.
+
+- Team: `89863526TH`
+- Bundle ID: `com.victormanuel.B2MSender`
+
+### No-install fallback: Shortcut
+
+This works on iOS and macOS without installing the extension.
+
+1. In the Shortcuts app, create a new shortcut and turn on **Show in Share Sheet**,
+   accepting URLs (Safari web pages).
+2. Add the **Get Contents of URL** action:
+   - URL: `https://modelsync.townsville.cc/api/makerworld-urls/start`
+   - Method: `POST`
+   - Request Body: **JSON**, with key `urls` set to **Shortcut Input**
+3. If a token is set, add the header `Authorization: Bearer <token>`.
+4. Add the **Show Result** action.
+5. Use it from Safari: **Share → shortcut name**.
+
+### Optional API token (`B2M_API_TOKEN`)
+
+When `B2M_API_TOKEN` is set, every `POST /api/*` request needs
+`Authorization: Bearer <token>` or `X-API-Key: <token>`. Same-origin requests from
+the web GUI and PWA keep working with no change. Put the same token in the
+extension's Settings.
+
+When it is unset, POST requests from other websites' pages (a foreign browser
+`Origin`) are refused with `403`. This blocks cross-site requests. curl, Shortcuts
+and the extension still work.
+
+The reverse proxy must pass the original `Host` header. Nginx Proxy Manager does
+this by default.
+
+### Developer
+
+```bash
+cd safari-extension && npm test
+```
+
+Tests use `node:test` and have no dependencies.
 
 ---
 

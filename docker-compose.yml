@@ -15,6 +15,7 @@ services:
     #   MANYFOLD_URL=https://your-manyfold.example.com
     #   MANYFOLD_CLIENT_ID=...
     #   MANYFOLD_CLIENT_SECRET=...
+    # - B2M_API_TOKEN=change-me  # optional; required by the Safari extension / Shortcut when set
     env_file:
       - .env
     volumes:

@@ -1,0 +1,45 @@
+name: Safari extension
+
+on:
+  push:
+    branches: [main]
+    paths: ["safari-extension/**", ".github/workflows/safari-extension.yml"]
+  pull_request:
+    paths: ["safari-extension/**", ".github/workflows/safari-extension.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm test
+        working-directory: safari-extension
+
+  build:
+    # The Xcode project uses Xcode 27's text project format, so the runner
+    # image needs Xcode 27+ installed.
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - scheme: "B2M Sender (macOS)"
+            destination: "generic/platform=macOS"
+          - scheme: "B2M Sender (iOS)"
+            destination: "generic/platform=iOS Simulator"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select Xcode 27
+        continue-on-error: true
+        run: ls -d /Applications/Xcode_27*.app && sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
+      - name: Show Xcode version
+        run: xcodebuild -version
+      - name: Build
+        working-directory: "safari-extension/xcode/B2M Sender"
+        run: xcodebuild -project "B2M Sender.xcodeproj" -scheme "${{ matrix.scheme }}" -destination "${{ matrix.destination }}" CODE_SIGNING_ALLOWED=NO build

@@ -29,6 +29,7 @@ if sys.version_info < (3, 10):
     sys.exit(f"❌ Python 3.10+ required (this is {sys.version.split()[0]}).")
 
 import datetime
+import hmac
 import importlib
 import io
 import json
@@ -40,6 +41,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 from flask import Flask, Response, jsonify, make_response, render_template, request
@@ -54,6 +56,48 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+_EXTENSION_SCHEMES = {"safari-web-extension", "chrome-extension", "moz-extension"}
+
+
+def _request_token() -> str:
+    """Token presented via `Authorization: Bearer` or `X-API-Key` ("" if none)."""
+    auth = request.headers.get("Authorization", "")
+    if auth[:7].lower() == "bearer ":
+        return auth[7:].strip()
+    return request.headers.get("X-API-Key", "").strip()
+
+
+@app.before_request
+def _guard_api_posts():
+    """Guard every POST to /api/*.
+
+    B2M_API_TOKEN (read per request; empty = unset) enables token auth. A
+    valid token (Bearer or X-API-Key) always passes. With a token set, other
+    callers must be same-origin (the web GUI sends no token). With no token
+    set, only a foreign browser Origin is refused; requests without an Origin
+    (curl, iOS Shortcuts) and extension origins are allowed. Origin hosts are
+    compared without scheme because a TLS-terminating proxy talks HTTP to us.
+    """
+    if request.method != "POST" or not request.path.startswith("/api/"):
+        return None
+    token = os.getenv("B2M_API_TOKEN", "")
+    presented = _request_token()
+    if token and presented and hmac.compare_digest(presented.encode(), token.encode()):
+        return None
+
+    origin = request.headers.get("Origin")
+    same_origin = bool(origin) and urlsplit(origin).netloc == request.host
+    if token:
+        if same_origin:
+            return None
+        return jsonify(ok=False, error="unauthorized"), 401
+    if origin is None:
+        return None
+    if same_origin or urlsplit(origin).scheme in _EXTENSION_SCHEMES:
+        return None
+    return jsonify(ok=False, error="forbidden origin"), 403
+
 
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8089"))
@@ -90,6 +134,7 @@ APP_VERSION = _get_version()
 # ── Config persistence ────────────────────────────────────────────────────────
 # Same field set + env-var-as-default precedence as bambuddy_to_manyfold_gui.py's
 # FIELD_DEFAULTS/load_gui_config, just relocated to a Docker-friendly path.
+
 
 def _default_web_config_file() -> Path:
     env_path = os.getenv("WEB_CONFIG_FILE")
@@ -162,11 +207,13 @@ def _load_sync_module():
     there's no concurrent thread relying on the previous module object.
     """
     import bambuddy_to_manyfold as sync_mod
+
     importlib.reload(sync_mod)
     return sync_mod
 
 
 # ── Background job + SSE machinery ───────────────────────────────────────────
+
 
 class SyncJob:
     """Tracks one load/sync/cleanup run: status, an append-only log buffer that
@@ -318,16 +365,17 @@ def _run_load(job: SyncJob):
     for a in archives:
         aid = a.get("id")
         name = a.get("name") or a.get("filename", f"archive_{aid}")
-        archive_rows.append({
-            "id": aid,
-            "name": _strip_ext(name),
-            "status": "synced" if aid in synced_archive_ids else "new",
-            "date": a.get("created_at") or a.get("created") or "",
-        })
+        archive_rows.append(
+            {
+                "id": aid,
+                "name": _strip_ext(name),
+                "status": "synced" if aid in synced_archive_ids else "new",
+                "date": a.get("created_at") or a.get("created") or "",
+            }
+        )
 
     supported = [
-        lf for lf in lib_files
-        if Path(lf.get("filename") or lf.get("name", "")).suffix.lower() in SUPPORTED_LIB_EXTS
+        lf for lf in lib_files if Path(lf.get("filename") or lf.get("name", "")).suffix.lower() in SUPPORTED_LIB_EXTS
     ]
     lib_rows = []
     for lf in supported:
@@ -336,12 +384,14 @@ def _run_load(job: SyncJob):
         stem = _strip_ext(fname)
         folder_id = lf.get("folder_id")
         folder_path = folder_by_id[folder_id]["_full_path"] if folder_id in folder_by_id else None
-        lib_rows.append({
-            "id": fid,
-            "name": f"{folder_path}/{stem}" if folder_path else stem,
-            "status": "synced" if fid in synced_file_ids else "new",
-            "date": lf.get("created_at") or lf.get("created") or "",
-        })
+        lib_rows.append(
+            {
+                "id": fid,
+                "name": f"{folder_path}/{stem}" if folder_path else stem,
+                "status": "synced" if fid in synced_file_ids else "new",
+                "date": lf.get("created_at") or lf.get("created") or "",
+            }
+        )
 
     print(f"\n  ℹ️  {job.t('log.loaded_summary', archives=len(archive_rows), files=len(lib_rows))}\n")
 
@@ -357,9 +407,7 @@ def _run_sync(job: SyncJob, options: dict):
     selected_archive_ids = options.get("selected_archive_ids")
     selected_library_file_ids = options.get("selected_library_file_ids")
     selected_archive_ids = set(selected_archive_ids) if selected_archive_ids is not None else None
-    selected_library_file_ids = (
-        set(selected_library_file_ids) if selected_library_file_ids is not None else None
-    )
+    selected_library_file_ids = set(selected_library_file_ids) if selected_library_file_ids is not None else None
 
     _banner("🚀", "log.sync_started_banner", job.t, dry_run)
     sync_mod.check_connections(session)
@@ -370,7 +418,10 @@ def _run_sync(job: SyncJob, options: dict):
 
     start = time.time()
     archives_added = sync_mod.sync_archives(
-        session, state, existing_names, dry_run,
+        session,
+        state,
+        existing_names,
+        dry_run,
         selected_ids=selected_archive_ids,
         create_missing=options.get("create_missing", True),
         force=options.get("force", False),
@@ -381,7 +432,10 @@ def _run_sync(job: SyncJob, options: dict):
         print(f"\n⚠️  {job.t('log.stopped_before_library')}\n")
     else:
         library_added = sync_mod.sync_library_files(
-            session, state, existing_names, dry_run,
+            session,
+            state,
+            existing_names,
+            dry_run,
             selected_ids=selected_library_file_ids,
             create_missing=options.get("create_missing", True),
             force=options.get("force", False),
@@ -423,7 +477,11 @@ def _run_makerworld_url_sync(job: SyncJob, options: dict):
 
     start = time.time()
     synced = sync_mod.sync_makerworld_urls(
-        session, state, existing_names, urls, dry_run,
+        session,
+        state,
+        existing_names,
+        urls,
+        dry_run,
         create_missing=options.get("create_missing", True),
         force=options.get("force", False),
         add_source_links=options.get("add_links", True),
@@ -522,6 +580,7 @@ def manifest():
 
 # ── Routes: config ────────────────────────────────────────────────────────────
 
+
 @app.get("/api/config")
 def get_config():
     cfg = load_web_config()
@@ -558,6 +617,7 @@ def post_config():
 
 
 # ── Routes: health ────────────────────────────────────────────────────────────
+
 
 @app.get("/api/health")
 def health():
@@ -620,6 +680,7 @@ def health():
 
 
 # ── Routes: models + jobs ─────────────────────────────────────────────────────
+
 
 @app.post("/api/models/load")
 def start_load():
@@ -693,7 +754,10 @@ def start_makerworld_url_sync():
     }
 
     job = _try_start_job(
-        "makerworld_urls", options, lambda job: _run_makerworld_url_sync(job, options), lang=lang,
+        "makerworld_urls",
+        options,
+        lambda job: _run_makerworld_url_sync(job, options),
+        lang=lang,
     )
     if job is None:
         return jsonify(ok=False, error=t("web.job_already_running")), 409
@@ -715,7 +779,8 @@ def start_cleanup():
     dry_run = bool(body.get("dry_run"))
 
     job = _try_start_job(
-        "cleanup", {"collection": collection, "dry_run": dry_run},
+        "cleanup",
+        {"collection": collection, "dry_run": dry_run},
         lambda job: _run_cleanup(job, collection, dry_run),
         lang=lang,
     )
