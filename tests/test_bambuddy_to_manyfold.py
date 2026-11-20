@@ -21,6 +21,8 @@ from bambuddy_to_manyfold import (
     _image_ext_from_url,
     _makerworld_model_id,
     _makerworld_profile_id,
+    _makerworld_summary,
+    _makerworld_title,
     _model_id_from_location,
     _slugify,
     create_manyfold_model_from_upload,
@@ -1034,3 +1036,29 @@ def test_enrich_continues_when_an_extra_image_fails():
 
     # cover + (5 images - cover - 1 failed) = 4 uploads attempted successfully
     assert mock_add.call_count == 4
+
+
+# ── Translated MakerWorld text ─────────────────────────────────────────────
+
+
+def test_title_prefers_translated():
+    assert _makerworld_title({"title": "塞尔达", "titleTranslated": "Zelda Helmet"}) == "Zelda Helmet"
+
+
+def test_title_falls_back_when_translation_empty_or_missing():
+    assert _makerworld_title({"title": " Original ", "titleTranslated": ""}) == "Original"
+    assert _makerworld_title({"title": "Original"}) == "Original"
+    assert _makerworld_title({}) == ""
+    assert _makerworld_title(None) == ""
+
+
+def test_summary_prefers_translated_then_original():
+    assert _makerworld_summary({"summary": "<p>原</p>", "summaryTranslated": "<p>EN</p>"}) == "<p>EN</p>"
+    assert _makerworld_summary({"summary": "<p>orig</p>", "summaryTranslated": ""}) == "<p>orig</p>"
+    assert _makerworld_summary({}) is None
+
+
+def test_tags_prefer_translated_then_original():
+    assert _extract_makerworld_tags({"tags": ["面具"], "tagsTranslated": ["Mask"]}) == ["Mask"]
+    assert _extract_makerworld_tags({"tags": ["mask"], "tagsTranslated": []}) == ["mask"]
+    assert _extract_makerworld_tags({"tags": ["mask"]}) == ["mask"]

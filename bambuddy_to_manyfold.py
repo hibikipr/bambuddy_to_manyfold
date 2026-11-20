@@ -521,9 +521,39 @@ def _html_to_markdown(value: str | None) -> str | None:
     return text.strip() or None
 
 
+def _makerworld_title(design: dict | None) -> str:
+    """Design title, preferring MakerWorld's translated one (what the site shows).
+
+    ``titleTranslated`` is empty when the author wrote in English already, so
+    fall back to the original ``title``.
+    """
+    d = design or {}
+    for key in ("titleTranslated", "title"):
+        val = d.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
+def _makerworld_summary(design: dict | None) -> str | None:
+    """Design summary HTML, preferring ``summaryTranslated`` over ``summary``."""
+    d = design or {}
+    for key in ("summaryTranslated", "summary"):
+        val = d.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+    return None
+
+
 def _extract_makerworld_tags(design: dict) -> list[str]:
-    """Pull a flat list of tag strings from the design's ``tags`` field, if any."""
-    raw = design.get("tags")
+    """Pull a flat list of tag strings from the design, if any.
+
+    Prefers ``tagsTranslated`` (English, matching what the MakerWorld site
+    shows) and falls back to the author's original ``tags``.
+    """
+    raw = design.get("tagsTranslated")
+    if not isinstance(raw, list) or not raw:
+        raw = design.get("tags")
     if not isinstance(raw, list):
         return []
     tags: list[str] = []
@@ -1175,8 +1205,8 @@ def enrich_manyfold_model_from_makerworld(
     if not design:
         return
 
-    title = (design.get("title") or "").strip() or None
-    description = _html_to_markdown(design.get("summary"))
+    title = _makerworld_title(design) or None
+    description = _html_to_markdown(_makerworld_summary(design))
     tags = _extract_makerworld_tags(design)
     creator_name = (design.get("designCreator") or {}).get("name")
     creator_at_id = ensure_manyfold_creator(session, creator_name) if creator_name else None
@@ -1758,7 +1788,7 @@ def sync_library_files(
         design = None
         if source_url and enrich_from_makerworld and not dry_run:
             design = get_makerworld_design(session, source_url)
-            title = (design or {}).get("title")
+            title = _makerworld_title(design)
             if title and title.strip():
                 model_name = title.strip()
 
@@ -1848,7 +1878,7 @@ def sync_library_files(
         design = None
         if rep_url and enrich_from_makerworld and not dry_run:
             design = get_makerworld_design(session, rep_url)
-            title = (design or {}).get("title")
+            title = _makerworld_title(design)
             if title and title.strip():
                 model_name = title.strip()
 
