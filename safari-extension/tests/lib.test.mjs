@@ -52,3 +52,19 @@ test("resultFor branches", () => {
     assert.match(r.color, /^#[0-9a-f]{6}$/i);
   }
 });
+
+test("extension scripts are pure ASCII (Safari may decode them as Latin-1)", async () => {
+  const { readdir, readFile } = await import("node:fs/promises");
+  const dir = new URL("../src/", import.meta.url);
+  for (const name of (await readdir(dir)).filter((n) => n.endsWith(".js"))) {
+    const text = await readFile(new URL(name, dir), "utf8");
+    const bad = [...text].find((c) => c.charCodeAt(0) > 127);
+    assert.equal(bad, undefined, `${name} contains non-ASCII ${JSON.stringify(bad)}`);
+  }
+});
+
+test("resultFor badges and messages use the intended symbols", () => {
+  assert.equal(resultFor(202).badge, "✓");
+  assert.match(resultFor(202).message, /—/);
+  assert.equal(resultFor(500).badge, "✗");
+});
