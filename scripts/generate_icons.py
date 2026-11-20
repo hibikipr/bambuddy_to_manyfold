@@ -23,8 +23,8 @@ from pathlib import Path
 OUT_DIR = Path(__file__).resolve().parent.parent / "static" / "icons"
 CHROME = os.environ.get("CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
-TILE = "#1a1a1a"   # app theme background
-EDGE = "#3d3d3d"   # Bambuddy border colour
+TILE = "#1a1a1a"  # app theme background
+EDGE = "#3d3d3d"  # Bambuddy border colour
 INK = "#f5f5f5"
 ACCENT, ACCENT_LIGHT, ACCENT_DARK = "#00AE42", "#00C64D", "#009438"  # Bambu green
 
@@ -47,8 +47,10 @@ def _variant(kind: str) -> str:
     """Wrap GLYPH (drawn on a 100x100 grid) for one icon variant."""
     if kind == "any":
         # Rounded dark tile, transparent outside it.
-        bg = (f'<rect width="100" height="100" rx="22" fill="{TILE}"/>'
-              f'<rect x="0.5" y="0.5" width="99" height="99" rx="21.5" fill="none" stroke="{EDGE}"/>')
+        bg = (
+            f'<rect width="100" height="100" rx="22" fill="{TILE}"/>'
+            f'<rect x="0.5" y="0.5" width="99" height="99" rx="21.5" fill="none" stroke="{EDGE}"/>'
+        )
         glyph = GLYPH
     elif kind == "maskable":
         # Full-bleed background; glyph shrunk into the ~80% maskable safe zone.
@@ -57,19 +59,30 @@ def _variant(kind: str) -> str:
     else:  # apple: full-bleed square, iOS rounds the corners itself
         bg = f'<rect width="100" height="100" fill="{TILE}"/>'
         glyph = GLYPH
-    return ('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">'
-            f"{bg}{glyph}</svg>\n")
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">{bg}{glyph}</svg>\n'
 
 
 def _render(svg: Path, png: Path, size: int):
     html = svg.with_suffix(".render.html")
-    html.write_text(f'<html><body style="margin:0;background:transparent">'
-                    f'<img src="{svg.name}" style="display:block;width:{size}px;height:{size}px"></body></html>')
+    html.write_text(
+        f'<html><body style="margin:0;background:transparent">'
+        f'<img src="{svg.name}" style="display:block;width:{size}px;height:{size}px"></body></html>'
+    )
     try:
-        subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                        "--default-background-color=00000000", f"--window-size={size},{size}",
-                        f"--screenshot={png}", html.as_uri()],
-                       check=True, capture_output=True)
+        subprocess.run(
+            [
+                CHROME,
+                "--headless=new",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--default-background-color=00000000",
+                f"--window-size={size},{size}",
+                f"--screenshot={png}",
+                html.as_uri(),
+            ],
+            check=True,
+            capture_output=True,
+        )
     finally:
         html.unlink()
 

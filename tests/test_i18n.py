@@ -19,15 +19,15 @@ class TestGetTranslation:
         assert i18n.get_translation("en", "web.config_heading") == "Configuration"
 
     def test_unknown_language_falls_back_to_english(self):
-        assert i18n.get_translation("xx", "web.config_heading") == i18n.get_translation(
-            "en", "web.config_heading"
-        )
+        assert i18n.get_translation("xx", "web.config_heading") == i18n.get_translation("en", "web.config_heading")
 
     def test_interpolates_kwargs(self):
         assert i18n.get_translation("en", "log.sync_complete", elapsed="12.3") == "Sync complete in 12.3s"
 
     def test_interpolates_kwargs_in_non_english_language(self):
-        assert i18n.get_translation("de", "log.sync_complete", elapsed="12.3") == "Synchronisierung in 12.3s abgeschlossen"
+        assert (
+            i18n.get_translation("de", "log.sync_complete", elapsed="12.3") == "Synchronisierung in 12.3s abgeschlossen"
+        )
 
     def test_missing_interpolation_kwarg_returns_unformatted_string(self):
         result = i18n.get_translation("en", "log.sync_complete")

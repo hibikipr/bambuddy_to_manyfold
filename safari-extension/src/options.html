@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B2M Sender</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#1c1c1e; --mut:#6b6b70; --bd:#c7c7cc; --ac:#0a84ff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1c1e; --fg:#f2f2f7; --mut:#98989f; --bd:#48484a; } }
+  body { font:15px/1.45 -apple-system,system-ui,sans-serif; background:var(--bg); color:var(--fg); margin:0; padding:16px; max-width:520px; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  label { display:block; margin:12px 0 4px; font-weight:600; }
+  input { width:100%; box-sizing:border-box; padding:8px 10px; font:inherit; color:var(--fg); background:transparent; border:1px solid var(--bd); border-radius:8px; }
+  button { font:inherit; padding:8px 14px; margin:14px 8px 0 0; border-radius:8px; border:1px solid var(--bd); background:transparent; color:var(--fg); }
+  button.primary { background:var(--ac); border-color:var(--ac); color:#fff; }
+  #status { margin-top:14px; min-height:1.4em; }
+  .note { color:var(--mut); font-size:13px; margin-top:18px; }
+</style>
+</head>
+<body>
+<h1>B2M Sender</h1>
+<label for="baseUrl">Server URL</label>
+<input id="baseUrl" type="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://modelsync.townsville.cc">
+<label for="token">API token (optional)</label>
+<input id="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+<div>
+  <button id="save" class="primary">Save</button>
+  <button id="test">Test connection</button>
+</div>
+<div id="status" role="status"></div>
+<p class="note">The server host must be <code>modelsync.townsville.cc</code> unless the extension manifest's <code>host_permissions</code> are edited.</p>
+<script src="options.js"></script>
+</body>
+</html>

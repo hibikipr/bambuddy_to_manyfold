@@ -1,3 +1,6 @@
+# Matches the hand-formatted ~120-column style already used in the repo.
+line-length = 120
+
 [lint]
 # Explicit, not relying on ruff's implicit default: with only
 # [lint.per-file-ignores] below and no `select` at all, ruff 0.15 resolved to
