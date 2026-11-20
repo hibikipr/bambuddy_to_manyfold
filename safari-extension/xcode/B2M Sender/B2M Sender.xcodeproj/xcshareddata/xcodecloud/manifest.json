@@ -1,0 +1,9 @@
+{
+  "id" : "3f32f0fe-ce8c-48ae-ab94-7b61b32ed302",
+  "targets" : [
+    {
+      "id" : "003e32f1-15ea-4712-a7da-fde461babd6d",
+      "name" : "B2M Sender (iOS)"
+    }
+  ]
+}
