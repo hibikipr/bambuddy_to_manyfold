@@ -35,9 +35,6 @@ jobs:
             destination: "generic/platform=iOS Simulator"
     steps:
       - uses: actions/checkout@v7
-      - name: Select Xcode 27
-        continue-on-error: true
-        run: ls -d /Applications/Xcode_27*.app && sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
       - name: Show Xcode version
         run: xcodebuild -version
       - name: Build
