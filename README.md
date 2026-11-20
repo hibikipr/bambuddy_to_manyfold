@@ -402,6 +402,9 @@ Tests use `node:test` and have no dependencies.
     - **description** (notes) ← the design summary, converted from HTML to Markdown
     - **tags** (keywords) ← the design tags
     - **creator** ← the MakerWorld designer (found or created in Manyfold by name)
+    - **English text** ← the title, description and tags use MakerWorld's English translation when it
+      has one. A model already in Manyfold under the author's original title is renamed rather than
+      duplicated, and uploaded files are named `<title> - <profile title>.3mf` from the translated titles
     - **images** ← the cover, gallery and profile photos (up to 40), each uploaded as a model
       file; the cover is set as the model's preview
 
