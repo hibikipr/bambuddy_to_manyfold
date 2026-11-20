@@ -23,9 +23,10 @@ jobs:
         working-directory: safari-extension
 
   build:
-    # The Xcode project uses Xcode 27's text project format, so the runner
-    # image needs Xcode 27+ installed.
-    runs-on: macos-latest
+    # The Xcode project uses Xcode 27's text project format (project.xcproj),
+    # which Xcode 26 can't open. The xcode-27 image (preview) ships Xcode 27:
+    # https://github.com/actions/runner-images/issues/14404
+    runs-on: xcode-27
     strategy:
       matrix:
         include:
